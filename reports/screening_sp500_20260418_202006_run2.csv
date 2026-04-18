@@ -1,0 +1,2 @@
+rank,ticker,score,above_ma200,above_ma50,current_ratio,debt_to_equity,dividend_yield,earnings_growth,market_cap,momentum_12m,momentum_1m,momentum_3m,momentum_6m,pb_ratio,pe_ratio,profit_margin,ps_ratio,revenue_growth,roa,roe,rsi_14,volatility_30d,volume_ratio
+1,MRK,3.65,1.0,1.0,1.536,0.95959,28600.0,-1930.0,294387712000.0,61.3856,4.2645,10.2195,44.1577,5.601186,16.355768,2807.8,4.5282755,500.0,1204.2,3688.2,51.0601,20.8048,1.5372

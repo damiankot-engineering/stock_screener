@@ -1,0 +1,2 @@
+rank,ticker,score,above_ma200,above_ma50,current_ratio,debt_to_equity,dividend_yield,earnings_growth,market_cap,momentum_12m,momentum_1m,momentum_3m,momentum_6m,pb_ratio,pe_ratio,profit_margin,ps_ratio,revenue_growth,roa,roe,rsi_14,volatility_30d,volume_ratio
+1,KGH.WA,3.65,1.0,1.0,1.096,0.17779,,7200.0,68330000384.0,205.8639,24.7353,6.799,77.7113,2.0814548,18.517614,1014.1,1.8794179,1430.0,451.3,1153.3,67.7257,57.3368,1.1136
