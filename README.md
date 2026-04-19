@@ -1,65 +1,70 @@
-# 📊 Stock Screener – System selekcji akcji z analizą historyczną
+# 📊 Stock Screener – AI-Powered Global Equity Research System
 
-Kompletny, modularny system do automatycznej selekcji spółek giełdowych,
-budowania portfela inwestycyjnego i analizy historycznej wyników.
-Wszystkie dane pochodzą z darmowych źródeł (Yahoo Finance, Wikipedia).
+Kompletny, modularny system do automatycznej selekcji spółek giełdowych z całego świata.
+Listy tickerów generowane są przez modele językowe (LLM) na podstawie precyzyjnych,
+wielokryterialnych promptów strategicznych. Dane finansowe z Yahoo Finance (darmowe).
 
 ---
 
-## 🏗️ Architektura systemu
+## 🆕 AI Ticker Source – jak to działa?
+
+Zamiast pobierać statyczne indeksy (S&P500, WIG20), system **pyta model językowy**:
+
+```
+[Strategia: growth_quality, n=50]
+
+"You are a senior equity research analyst with 20+ years of experience...
+ Identify exactly 50 publicly traded companies combining quality fundamentals
+ with growth potential. [ROIC >15%, moat, rev.growth >10%, diversity criteria]
+ Return ONLY a valid JSON array of ticker symbols."
+
+→ ["AAPL", "MSFT", "ASML.AS", "NOVO-B.CO", "HDFC.NS", "6098.T", ...]
+```
+
+Efekt: każde uruchomienie bada **inną, globalną grupę spółek** — AI wie o firmach,
+o których statyczne indeksy nie wiedzą.
+
+---
+
+## 🏗️ Architektura
 
 ```
 stock_screener/
-├── main.py                    # Punkt wejścia + orchestrator pipeline
+├── main.py                         ← Orchestrator pipeline + CLI
 │
 ├── config/
-│   ├── user_config.yaml       # ← EDYTUJ TUTAJ swoje progi i ustawienia
-│   └── settings.py            # Ładowanie i walidacja konfiguracji
+│   ├── user_config.yaml            ← EDYTUJ: strategia, progi, backend
+│   └── settings.py                 ← Ładowanie i walidacja konfiguracji
 │
 ├── data/
-│   ├── ticker_source.py       # Pobieranie list tickerów (S&P500, WIG20, DAX40...)
-│   └── fetcher.py             # Pobieranie danych z Yahoo Finance (równoległe)
+│   ├── ai_ticker_source.py         ← ★ NOWY: AI Ticker Source
+│   │   ├── PromptLibrary           ← 6 strategii inwestycyjnych
+│   │   ├── AITickerSource          ← Fasada (single/multi-shot)
+│   │   ├── TickerParser            ← Parsowanie odpowiedzi AI
+│   │   └── BackendFactory          ← Groq | Anthropic | OpenAI | Mock
+│   ├── ticker_source.py            ← Router → AITickerSource
+│   └── fetcher.py                  ← Yahoo Finance (równoległe, retry)
 │
 ├── db/
-│   ├── models.py              # Schema SQLAlchemy (4 tabele)
-│   └── repository.py          # Warstwa dostępu do danych (Repository Pattern)
+│   ├── models.py                   ← 4 tabele SQLite (EAV, historia)
+│   └── repository.py               ← Repository Pattern (inkrementacyjny)
 │
 ├── screening/
-│   ├── filter_engine.py       # Filtrowanie wg progów użytkownika
-│   └── scorer.py              # Scoring i ranking (ważona normalizacja)
+│   ├── filter_engine.py            ← Filtry AND z progami użytkownika
+│   └── scorer.py                   ← Min-max + wagi → ranking
 │
 ├── portfolio/
-│   └── builder.py             # Budowa portfela + bonus stabilności historycznej
+│   └── builder.py                  ← equal/score/rank weighted + stabilność
 │
 ├── reports/
-│   └── reporter.py            # Rich console output + eksport CSV
+│   └── reporter.py                 ← Rich console + eksport CSV
 │
 ├── scheduler/
-│   └── runner.py              # APScheduler (daily/weekly/monthly)
+│   └── runner.py                   ← APScheduler (daily/weekly/monthly)
 │
+├── test_ai_source.py               ← Testy jednostkowe (bez API key)
 └── requirements.txt
 ```
-
----
-
-## 🗄️ Schema bazy danych
-
-```
-screening_runs           ← metadane każdego uruchomienia
-    │
-    ├── metric_snapshots     ← surowe wartości metryk (EAV: ticker × run × metric = value)
-    │                           nigdy nie nadpisywane – pełna historia
-    │
-    ├── screening_results    ← kto przeszedł filtry, z jakim score i rankiem
-    │
-    └── portfolio_snapshots  ← skład portfela po każdym uruchomieniu
-```
-
-**Kluczowe decyzje projektowe bazy:**
-- **Nigdy nie nadpisujemy** – każde uruchomienie = nowe rekordy
-- **Model EAV** dla metryk → nowe metryki bez zmiany schematu
-- **WAL mode SQLite** → lepsza wydajność przy równoległych operacjach
-- **Indeksy** na (ticker, metric_name) i (run_id) → szybkie zapytania historyczne
 
 ---
 
@@ -69,176 +74,195 @@ screening_runs           ← metadane każdego uruchomienia
 # 1. Instalacja zależności
 pip install -r requirements.txt
 
-# 2. Jedno uruchomienie (S&P500, domyślna konfiguracja)
-python main.py
+# 2. Rejestracja Groq (darmowa, bez karty kredytowej)
+#    → https://console.groq.com → API Keys → Create API Key
 
-# 3. Własna konfiguracja
-python main.py --config my_config.yaml
+# 3. Ustaw klucz API
+export GROQ_API_KEY=gsk_twój_klucz
 
-# 4. Inne źródło danych
-python main.py --source wig20
-python main.py --source nasdaq100
-python main.py --source dax40
+# 4. Uruchomienie
+python main.py                                       # domyślna strategia (growth_quality, 50 spółek)
+python main.py --strategy deep_value                 # niedowartościowane spółki
+python main.py --strategy compounders                # najwyższa jakość, długi horyzont
+python main.py --strategy sector_leaders --sector healthcare
+python main.py --strategy thematic --theme "quantum computing"
+python main.py --strategy global_diversified         # szeroki globalny portfel badawczy
+python main.py --n 80                                # więcej tickerów
+python main.py --multi-shot                          # 3× więcej spółek (3 zapytania AI)
+python main.py --backend mock                        # test bez API key
+python main.py --analyze                             # historia uruchomień
+python main.py --schedule                            # harmonogram (wg config)
 
-# 5. Analiza historyczna (po kilku uruchomieniach)
-python main.py --analyze
+# 5. Testy (bez internetu i API key)
+python test_ai_source.py
+```
 
-# 6. Automatyczny harmonogram (wg ustawień w config)
-python main.py --schedule
+---
+
+## 🧠 Strategie AI
+
+| Strategia | Opis | Domyślne n |
+|-----------|------|-----------|
+| `growth_quality` | Wzrost + jakość fundamentalna, globalna diversyfikacja | 50 |
+| `deep_value` | Niedowartościowane z marżą bezpieczeństwa | 40 |
+| `compounders` | Tylko szeroki moat, ROIC >20%, długi horyzont | 30 |
+| `sector_leaders` | Liderzy i challengers w wybranym sektorze | 40 |
+| `thematic` | Ekspozycja na wybrany megatrend | 35 |
+| `global_diversified` | Precyzyjna alokacja geogr. i sektorowa | 60 |
+
+### Przykłady tematycznych portfeli
+
+```bash
+python main.py --strategy thematic --theme "artificial intelligence"
+python main.py --strategy thematic --theme "clean energy transition"
+python main.py --strategy thematic --theme "longevity and biotech"
+python main.py --strategy thematic --theme "defense and cybersecurity"
+python main.py --strategy thematic --theme "emerging market consumer"
+python main.py --strategy thematic --theme "space economy"
+```
+
+---
+
+## 🤖 Dostępne backendy LLM
+
+| Backend | Koszt | Model domyślny | Rejestracja |
+|---------|-------|----------------|-------------|
+| **Groq** (domyślny) | **DARMOWY** | `llama-3.3-70b-versatile` | https://console.groq.com |
+| Anthropic | Płatne | `claude-sonnet-4-6` | https://console.anthropic.com |
+| OpenAI | Płatne | `gpt-4o-mini` | https://platform.openai.com |
+| Mock | Brak | — | Brak (testowy) |
+
+### Przełączanie backendów
+
+```yaml
+# config/user_config.yaml
+source:
+  ai:
+    backend: "groq"           # ← zmień na anthropic lub openai
+    api_key_env: "GROQ_API_KEY"
+    model: "llama-3.3-70b-versatile"
+```
+
+lub z CLI:
+```bash
+python main.py --backend anthropic    # wymaga ANTHROPIC_API_KEY
+python main.py --backend openai       # wymaga OPENAI_API_KEY
+```
+
+### Rejestracja własnego backendu (rozszerzalność)
+
+```python
+from data.ai_ticker_source import BackendFactory, LLMBackend
+
+class MyCustomLLM(LLMBackend):
+    @property
+    def name(self): return "MyLLM/v1"
+    def call(self, system, user, temperature):
+        # ... twoja implementacja ...
+        return '{"tickers": ["AAPL", "MSFT"]}'
+
+BackendFactory.register("my_llm", MyCustomLLM)
+```
+
+---
+
+## 🎯 Tryb Multi-Shot (ekspansja universum)
+
+```bash
+python main.py --multi-shot --n 60
+```
+
+Wysyła 3 zapytania do AI z rosnącą temperaturą (0.2 → 0.5 → 0.7),
+łącząc wyniki w unię. Efekt: ~150–180 unikalnych spółek zamiast 60.
+Idealny do szerokiego research'u i odkrywania mniej oczywistych spółek.
+
+```yaml
+# user_config.yaml
+source:
+  ai:
+    multi_shot: true
+    multi_shot_runs: 3
+    n_tickers: 60       # per shot → ~180 total
 ```
 
 ---
 
 ## ⚙️ Konfiguracja (user_config.yaml)
 
-### Źródło danych
+### Strategia i backend
 ```yaml
 source:
-  index: "sp500"    # sp500 | nasdaq100 | wig20 | dax40 | custom
-  custom_tickers:   # używane tylko przy index: "custom"
-    - "AAPL"
-    - "MSFT"
+  strategy: "growth_quality"    # lub: deep_value, compounders, sector_leaders, thematic
+  ai:
+    backend: "groq"
+    api_key_env: "GROQ_API_KEY"
+    model: "llama-3.3-70b-versatile"
+    n_tickers: 50
+    temperature: 0.35            # 0.2=deterministyczny, 0.8=różnorodny
+    sector: "healthcare"         # dla sector_leaders
+    theme: "clean energy"        # dla thematic
+    multi_shot: false
+    multi_shot_runs: 3
 ```
 
 ### Filtry (progi)
 ```yaml
 filters:
   fundamental:
-    pe_ratio:       [0, 35]       # min, max (null = brak ograniczenia)
-    roe:            [8, null]     # ROE minimum 8%
-    debt_to_equity: [null, 1.5]   # D/E maksimum 1.5
-
+    pe_ratio:       [0, 60]      # [min, max], null = bez ograniczenia
+    roe:            [10, null]   # ROE minimum 10%
+    debt_to_equity: [null, 2.0]
+    market_cap:     [5e8, null]  # min $500M
   technical:
-    rsi_14:         [30, 70]      # Unikamy wyprzedanych i wykupionych
-    momentum_3m:    [0, null]     # Pozytywne momentum
+    rsi_14:         [25, 80]
+    volume_ratio:   [0.3, null]
 ```
 
 ### Scoring (wagi)
 ```yaml
 scoring:
   weights:
-    roe:            2.0    # wyższe ROE → wyższy score
-    pe_ratio:      -0.5   # wyższe P/E → niższy score (ujemna waga)
-    debt_to_equity: -1.0
-    momentum_3m:    1.0
-```
-
-### Portfel
-```yaml
-portfolio:
-  max_positions: 20
-  weighting: "score_weighted"   # equal | score_weighted | rank_weighted
-  stability_bonus_weight: 0.5   # bonus za historyczną stabilność
+    roe:            2.0     # wyższe = ważniejsze w rankingu
+    revenue_growth: 1.8
+    pe_ratio:      -0.4     # ujemna waga = kara za wysokie P/E
+    debt_to_equity: -0.8
 ```
 
 ---
 
-## 📐 Algorytm scoringu
+## 🗄️ Baza danych – historia badań
 
-1. Dla każdej ważonej metryki: `norm = (value - min) / (max - min)` → [0, 1]
-2. `contribution = norm × weight`
-3. `score = Σ contributions`
-4. Sortowanie malejąco po score
-5. Ranking 1..N
-
-**Bonus stabilności:**
-- Spółki, które regularnie pojawiają się w screeningu historycznym, otrzymują bonus:
-  `combined_score = score + frequency × stability_bonus_weight`
-- Redukuje rotację portfela i preferuje firmy o stabilnych fundamentach
-
----
-
-## 📊 Dostępne metryki
-
-| Kategoria | Metryka | Opis |
-|-----------|---------|------|
-| Fundamentalne | `pe_ratio` | Cena / Zysk (trailing) |
-| | `pb_ratio` | Cena / Wartość księgowa |
-| | `ps_ratio` | Cena / Przychody |
-| | `roe` | Zwrot z kapitału (%) |
-| | `roa` | Zwrot z aktywów (%) |
-| | `debt_to_equity` | Wskaźnik zadłużenia |
-| | `current_ratio` | Płynność bieżąca |
-| | `revenue_growth` | Wzrost przychodów YoY (%) |
-| | `earnings_growth` | Wzrost zysku YoY (%) |
-| | `profit_margin` | Marża netto (%) |
-| | `dividend_yield` | Stopa dywidendy (%) |
-| | `market_cap` | Kapitalizacja (USD) |
-| Techniczne | `momentum_1m/3m/6m/12m` | Zmiana ceny (%) |
-| | `rsi_14` | RSI 14 dni |
-| | `volume_ratio` | Wolumen / Średnia 20d |
-| | `above_ma50` | Powyżej MA50 (0/1) |
-| | `above_ma200` | Powyżej MA200 (0/1) |
-| | `volatility_30d` | Roczna zmienność 30d (%) |
-
----
-
-## 🛡️ Obsługa błędów i skalowalność
-
-- **Retry z backoff**: każdy ticker pobierany do 3 razy
-- **Graceful degradation**: ticker z błędem → logowany, nie zatrzymuje procesu
-- **Brakujące metryki**: ticker z NULL w filtrowanej metryce → odrzucony (conservative)
-- **Rate limiting**: konfigurowalne opóźnienie między requestami (`api_delay_seconds`)
-- **ThreadPoolExecutor**: równoległe pobieranie (`fetch_workers` wątków)
-- **Bulk insert**: masowy zapis do SQLite przez `bulk_insert_mappings`
-- **WAL SQLite**: odporność na awarie podczas zapisu
-
----
-
-## 🔧 Technologie i uzasadnienie wyboru
-
-| Technologia | Uzasadnienie |
-|-------------|--------------|
-| **Python** | Ekosystem bibliotek finansowych, prosta składnia |
-| **yfinance** | Darmowe dane Yahoo Finance bez API key |
-| **SQLite + SQLAlchemy** | Brak serwera, pełna historia, SQL queries, portable |
-| **pandas / numpy** | Wydajne obliczenia na danych tabelarycznych |
-| **APScheduler** | Prosty, niezawodny scheduler z persistencją |
-| **Rich** | Czytelne wyjście konsolowe z tabelami i progress |
-| **PyYAML** | Czytelna konfiguracja dla użytkownika nietechnicznego |
-
----
-
-## 📈 Przykładowe wyniki (po kilku uruchomieniach)
+SQLite z 4 tabelami, bez nadpisywania (każdy run = nowe rekordy):
 
 ```
+screening_runs       ← metadane: strategia AI, czas, statystyki
+metric_snapshots     ← EAV: każda metryka każdej spółki z każdego runu
+screening_results    ← kto przeszedł filtry i z jakim score
+portfolio_snapshots  ← wagi portfela + stability_score
+```
+
+Po kilku uruchomieniach tej samej strategii:
+```bash
 python main.py --analyze
-
-Historia uruchomień: 5 łącznie
-┌──────────┬─────────────────────┬────────┬─────────┬────────┐
-│ run_id   │ timestamp           │ source │ fetched │ passed │
-├──────────┼─────────────────────┼────────┼─────────┼────────┤
-│ 1        │ 2024-01-08 07:00:02 │ sp500  │ 493     │ 47     │
-│ 2        │ 2024-01-15 07:00:01 │ sp500  │ 491     │ 52     │
-│ ...      │ ...                 │ ...    │ ...     │ ...    │
-└──────────┴─────────────────────┴────────┴─────────┴────────┘
-
-Top 15 najczęściej pojawiających się spółek:
-┌────────┬───────────┬──────┬───────────┐
-│ Ticker │ Wystąpień │ Freq │ Avg Score │
-├────────┼───────────┼──────┼───────────┤
-│ MSFT   │ 5         │ 100% │ 0.8234    │
-│ AAPL   │ 4         │  80% │ 0.7891    │
-│ ...    │ ...       │ ...  │ ...       │
-└────────┴───────────┴──────┴───────────┘
+# Pokaże: które spółki najczęściej pojawiają się w wynikach,
+# ich średni score, historię portfela
 ```
 
 ---
 
-## 🔮 Możliwa rozbudowa
+## 📁 Pliki wynikowe
 
-- **Więcej źródeł danych**: Alpha Vantage, EDGAR, Quandl, GPW API
-- **Więcej metryk**: DCF, EV/EBITDA, Altman Z-Score, insider transactions
-- **Backtesting**: symulacja zwrotów portfela na danych historycznych
-- **Web UI**: Flask/FastAPI + React dashboard z wykresami historii portfela
-- **Powiadomienia**: email/Slack po każdym uruchomieniu
-- **Multi-indeks**: screener jednocześnie na kilku giełdach
-- **ML ranking**: zamiast liniowego scoringu – model predykcyjny
+Po każdym uruchomieniu w katalogu `reports/`:
+```
+reports/
+├── screening_ai_growth_quality_20250420_070215_run1.csv  ← ranking ze scorami
+└── portfolio_ai_growth_quality_20250420_070215_run1.csv  ← portfel z wagami
+```
 
 ---
 
 ## ⚠️ Disclaimer
 
-System służy wyłącznie celom edukacyjnym i informacyjnym.
-Nie stanowi doradztwa inwestycyjnego. Dane z Yahoo Finance mogą być
-opóźnione lub niedokładne. Zawsze przeprowadź własną analizę due diligence.
+System służy wyłącznie celom edukacyjnym i informacyjnym. Nie stanowi doradztwa
+inwestycyjnego. Rekomendacje AI mogą być niedokładne. Dane Yahoo Finance mogą być
+opóźnione. Zawsze przeprowadź własne due diligence.

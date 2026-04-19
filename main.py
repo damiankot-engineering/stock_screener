@@ -5,7 +5,7 @@ Główny punkt wejścia systemu. Orkiestruje cały pipeline screenera.
 ARCHITEKTURA PIPELINE:
 ═══════════════════════════════════════════════════════════════
   [1] KONFIGURACJA      → Wczytaj user_config.yaml
-  [2] TICKER SOURCE     → Pobierz listę tickerów z indeksu
+  [2] AI TICKER SOURCE  → LLM generuje listę tickerów wg strategii
   [3] DATA FETCHER      → Pobierz dane fundamentalne + techniczne
   [4] DB SAVE           → Zapisz snapshoty metryk (inkrementacyjnie)
   [5] FILTER ENGINE     → Odfiltruj wg progów użytkownika
@@ -17,11 +17,16 @@ ARCHITEKTURA PIPELINE:
 ═══════════════════════════════════════════════════════════════
 
 UŻYCIE:
-  python main.py                          # Jedno uruchomienie (domyślna konfiguracja)
-  python main.py --config my_config.yaml  # Własna konfiguracja
-  python main.py --schedule               # Uruchom z harmonogramem
-  python main.py --analyze                # Pokaż analizę historyczną
-  python main.py --source wig20           # Nadpisz źródło danych z CLI
+  python main.py                           # Jedno uruchomienie (domyślna konfiguracja)
+  python main.py --config my_config.yaml   # Własna konfiguracja
+  python main.py --strategy compounders    # Nadpisz strategię AI
+  python main.py --strategy thematic --theme "clean energy"
+  python main.py --strategy sector_leaders --sector healthcare
+  python main.py --n 80                    # Nadpisz liczbę tickerów
+  python main.py --backend mock            # Tryb testowy (bez API key)
+  python main.py --multi-shot              # Szersze universum (3× więcej tickerów)
+  python main.py --schedule                # Uruchom z harmonogramem
+  python main.py --analyze                 # Pokaż analizę historyczną
 """
 from __future__ import annotations
 
@@ -85,13 +90,16 @@ class ScreenerPipeline:
         """
         start_time = time.time()
         source_config = self.config.get("source", {})
-        source_name = source_config.get("index", "sp500")
+        strategy = source_config.get("strategy", "growth_quality")
+        backend = source_config.get("ai", {}).get("backend", "groq")
+        n_tickers = source_config.get("ai", {}).get("n_tickers", 50)
+        source_name = f"ai_{strategy}"
 
-        # ── Krok 1: Pobierz listę tickerów ──────────────────
+        # ── Krok 1: AI generuje listę tickerów ──────────────
         logger.info("=" * 60)
-        logger.info(f"KROK 1: Pobieranie tickerów [{source_name.upper()}]")
+        logger.info(f"KROK 1: AI Ticker Source [backend={backend}, strategia={strategy}, n={n_tickers}]")
         tickers = get_tickers(source_config)
-        self.reporter.print_header(source_name, len(tickers))
+        self.reporter.print_header(f"AI:{strategy}@{backend}", len(tickers))
 
         # ── Krok 2: Pobierz dane ─────────────────────────────
         logger.info("=" * 60)
@@ -255,49 +263,77 @@ class ScreenerPipeline:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Stock Screener – selekcja akcji z analizą historyczną",
+        description="Stock Screener – selekcja akcji generowanych przez AI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
-        "--config",
-        default=None,
-        help="Ścieżka do pliku konfiguracyjnego YAML (domyślnie: config/user_config.yaml)",
+        "--config", default=None,
+        help="Ścieżka do pliku konfiguracyjnego YAML",
     )
     parser.add_argument(
-        "--source",
-        choices=["sp500", "nasdaq100", "wig20", "dax40", "custom"],
-        help="Nadpisz źródło danych z linii komend",
+        "--strategy",
+        choices=["growth_quality", "deep_value", "compounders",
+                 "sector_leaders", "thematic", "global_diversified"],
+        help="Nadpisz strategię AI z linii komend",
     )
     parser.add_argument(
-        "--schedule",
-        action="store_true",
+        "--backend",
+        choices=["groq", "anthropic", "openai", "mock"],
+        help="Nadpisz backend LLM (mock = bez API key, do testów)",
+    )
+    parser.add_argument(
+        "--n", type=int, dest="n_tickers",
+        help="Liczba tickerów do wygenerowania przez AI",
+    )
+    parser.add_argument(
+        "--sector", default=None,
+        help="Sektor dla strategii sector_leaders (np. healthcare)",
+    )
+    parser.add_argument(
+        "--theme", default=None,
+        help="Temat dla strategii thematic (np. 'clean energy')",
+    )
+    parser.add_argument(
+        "--multi-shot", action="store_true",
+        help="Tryb multi-shot: więcej zapytań AI = szersze universum spółek",
+    )
+    parser.add_argument(
+        "--schedule", action="store_true",
         help="Uruchom z automatycznym harmonogramem",
     )
     parser.add_argument(
-        "--analyze",
-        action="store_true",
-        help="Pokaż analizę historyczną (nie uruchamia nowego screeningu)",
+        "--analyze", action="store_true",
+        help="Pokaż analizę historyczną (bez nowego screeningu)",
     )
     parser.add_argument(
-        "--top",
-        type=int,
-        default=20,
-        help="Liczba top wyników do wyświetlenia (domyślnie: 20)",
+        "--top", type=int, default=20,
+        help="Liczba top wyników do wyświetlenia",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-
-    # Wczytaj konfigurację
     config = load_config(args.config)
 
-    # Nadpisz źródło z CLI jeśli podano
-    if args.source:
-        config["source"]["index"] = args.source
-        logger.info(f"Źródło danych nadpisane przez CLI: {args.source}")
+    # Nadpisz parametry AI z CLI
+    ai_cfg = config.setdefault("source", {}).setdefault("ai", {})
+    if args.strategy:
+        config["source"]["strategy"] = args.strategy
+        ai_cfg["strategy"] = args.strategy
+        logger.info(f"Strategia AI nadpisana przez CLI: {args.strategy}")
+    if args.backend:
+        ai_cfg["backend"] = args.backend
+        logger.info(f"Backend AI nadpisany przez CLI: {args.backend}")
+    if args.n_tickers:
+        ai_cfg["n_tickers"] = args.n_tickers
+    if args.sector:
+        ai_cfg["sector"] = args.sector
+    if args.theme:
+        ai_cfg["theme"] = args.theme
+    if args.multi_shot:
+        ai_cfg["multi_shot"] = True
 
     # Inicjalizacja pipeline
     pipeline = ScreenerPipeline(config)
