@@ -53,6 +53,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config.settings import load_config, setup_logging
 from data.ticker_source import get_tickers
 from data.fetcher import DataFetcher
+from data.enriched_fetcher import EnrichedFetcher
 from data.ticker_validator import TickerValidator
 from db.models import create_db_engine, get_session_factory
 from db.repository import ScreenerRepository
@@ -77,7 +78,7 @@ class ScreenerPipeline:
         session_factory = get_session_factory(engine)
 
         self.repository     = ScreenerRepository(session_factory)
-        self.fetcher        = DataFetcher(config)
+        self.fetcher        = EnrichedFetcher(config)   # Yahoo + EDGAR + FRED + Sentiment
         self.validator      = TickerValidator(
             repository=self.repository,
             workers=settings.get("fetch_workers", 10),
@@ -115,6 +116,22 @@ class ScreenerPipeline:
         if invalid_known:
             source_config.setdefault("ai", {})["avoid_tickers"] = invalid_known
             logger.info(f"Feedback loop: {len(invalid_known)} znanych złych tickerów dodanych do promptu AI")
+
+        # Pobierz kontekst makro i wstrzyknij do promptu AI
+        macro_context: str | None = None
+        if self.config.get("enrichment", {}).get("macro", {}).get("enabled", True):
+            try:
+                from data.macro_data import MacroDataFetcher
+                import os
+                fred_key = os.getenv("FRED_API_KEY", "").strip()
+                macro_snap = MacroDataFetcher(fred_api_key=fred_key or None).fetch()
+                macro_context = MacroDataFetcher(fred_api_key=fred_key or None)\
+                    .get_em_context_for_prompt(macro_snap)
+                source_config.setdefault("ai", {})["macro_context"] = macro_context
+                logger.info(f"Kontekst makro dla AI: {macro_context[:100]}...")
+            except Exception as exc:
+                logger.debug(f"Makro kontekst niedostępny: {exc}")
+
         tickers_raw = get_tickers(source_config)
 
         # ── 1b: Walidacja tickerów przez yfinance ─────────────
@@ -130,8 +147,8 @@ class ScreenerPipeline:
 
         # ── 2: Pobierz dane fundamentalne + techniczne ────────
         logger.info("=" * 60)
-        logger.info(f"KROK 2: Pobieranie danych dla {len(tickers)} tickerów")
-        ticker_data_list = self.fetcher.fetch_all(tickers)
+        logger.info(f"KROK 2: Pobieranie danych dla {len(tickers)} tickerów oraz wzbogacanie danych (FRED / SEC EDGAR / OpenFIGI")
+        ticker_data_list = self.fetcher.fetch_all_with_enrichment(tickers)
         fetch_errors  = sum(1 for td in ticker_data_list if not td.success)
         successful    = [td for td in ticker_data_list if td.success]
 
@@ -359,7 +376,8 @@ def parse_args() -> argparse.Namespace:
     # Screening options
     parser.add_argument("--strategy",
         choices=["growth_quality","deep_value","compounders",
-                 "sector_leaders","thematic","global_diversified"])
+                 "sector_leaders","thematic","global_diversified",
+                 "emerging_growth","asymmetric_risk"])
     parser.add_argument("--backend", choices=["groq","anthropic","openai","mock"])
     parser.add_argument("--n", type=int, dest="n_tickers")
     parser.add_argument("--sector", default=None)

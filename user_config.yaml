@@ -1,0 +1,192 @@
+# ============================================================
+#  STOCK SCREENER - KONFIGURACJA UŻYTKOWNIKA
+#  Edytuj ten plik, aby dostosować screener do swoich potrzeb
+# ============================================================
+
+# ── ŹRÓDŁO TICKERÓW (AI-generated) ──────────────────────────
+source:
+  # Strategia selekcji spółek przez AI:
+  #   growth_quality    – wzrost + jakość fundamentalna (DOMYŚLNA)
+  #   deep_value        – spółki niedowartościowane z marżą bezpieczeństwa
+  #   compounders       – długoterminowe compoundersy, najwyższa jakość
+  #   sector_leaders    – liderzy wybranego sektora (wymaga ai.sector)
+  #   thematic          – ekspozycja na megatrend (wymaga ai.theme)
+  #   global_diversified – szeroki globalny portfel badawczy
+  strategy: "growth_quality"
+
+  ai:
+    # Backend LLM:
+    #   groq       – DARMOWY: https://console.groq.com (bez karty kredytowej)
+    #                Ustaw: export GROQ_API_KEY=gsk_...
+    #   anthropic  – Claude (platny): export ANTHROPIC_API_KEY=sk-ant-...
+    #   openai     – GPT-4o (platny): export OPENAI_API_KEY=sk-...
+    #   mock       – tryb testowy bez API key
+    backend: "groq"
+    api_key_env: "GROQ_API_KEY"
+
+    # Model: llama-3.3-70b-versatile | llama-3.1-8b-instant | mixtral-8x7b-32768
+    model: "llama-3.3-70b-versatile"
+
+    # Liczba tickerów (zalecane: 30-80)
+    n_tickers: 50
+    temperature: 0.35
+    max_retries: 3
+
+    # Parametry strategii:
+    sector: "technology"                    # dla strategy: sector_leaders
+    theme: "artificial intelligence"        # dla strategy: thematic
+
+    # Multi-shot: wiele zapytań AI = szersze universum (~150-200 spolki)
+    multi_shot: false
+    multi_shot_runs: 3
+
+
+# ── POBIERANE METRYKI ────────────────────────────────────────
+metrics:
+  fundamental:
+    enabled: true
+    fields:
+      - pe_ratio
+      - pb_ratio
+      - ps_ratio
+      - roe
+      - roa
+      - debt_to_equity
+      - current_ratio
+      - revenue_growth
+      - earnings_growth
+      - profit_margin
+      - dividend_yield
+      - market_cap
+
+  technical:
+    enabled: true
+    fields:
+      - momentum_1m
+      - momentum_3m
+      - momentum_6m
+      - momentum_12m
+      - rsi_14
+      - volume_ratio
+      - above_ma50
+      - above_ma200
+      - volatility_30d
+
+
+# ── FILTRY / PROGI ───────────────────────────────────────────
+filters:
+  fundamental:
+    pe_ratio:       [0, 60]
+    pb_ratio:       [0, 20]
+    roe:            [10, null]
+    debt_to_equity: [null, 2.0]
+    current_ratio:  [0.8, null]
+    revenue_growth: [0, null]
+    profit_margin:  [3, null]
+    market_cap:     [5e8, null]
+
+  technical:
+    rsi_14:         [25, 80]
+    volume_ratio:   [0.3, null]
+
+
+# ── SCORING ──────────────────────────────────────────────────
+scoring:
+  weights:
+    roe:             2.0
+    revenue_growth:  1.8
+    earnings_growth: 1.5
+    profit_margin:   1.2
+    momentum_6m:     1.0
+    momentum_3m:     0.8
+    rsi_14:          0.3
+    pe_ratio:       -0.4
+    debt_to_equity: -0.8
+
+
+# ── PORTFEL ──────────────────────────────────────────────────
+portfolio:
+  max_positions: 20
+  min_results: 5
+  weighting: "score_weighted"
+  min_history_runs: 3
+  stability_bonus_weight: 0.5
+
+
+# ── SCHEDULER ────────────────────────────────────────────────
+scheduler:
+  enabled: false
+  frequency: "weekly"
+  run_at_hour: 7
+  weekday: 0
+
+
+# ── USTAWIENIA TECHNICZNE ─────────────────────────────────────
+settings:
+  fetch_workers: 5
+  api_delay_seconds: 0.3
+  db_path: "screener_data.db"
+  reports_dir: "reports"
+  log_level: "INFO"
+  price_history_days: 400
+  max_fetch_errors: 3
+  validation_cache_ttl_days: 30
+
+
+# ── ZEWNĘTRZNE ŹRÓDŁA DANYCH ─────────────────────────────────
+external_data:
+
+  # FRED (Federal Reserve) – wskaźniki makroekonomiczne
+  # Klucz opcjonalny: https://fred.stlouisfed.org/docs/api/api_key.html
+  fred:
+    enabled: true
+    api_key_env: "FRED_API_KEY"   # opcjonalny; bez klucza: 120 req/min
+
+  # SEC EDGAR – insider transactions (tylko spółki US)
+  # Bez klucza, całkowicie darmowy
+  sec_edgar:
+    enabled: true
+    workers: 5
+
+  # OpenFIGI – walidacja i metadata tickerów
+  # Klucz opcjonalny: https://www.openfigi.com/api
+  # Bez klucza: 25 req/min (może być wolny przy dużej liście)
+  openfigi:
+    enabled: false
+    api_key_env: "OPENFIGI_API_KEY"
+
+
+# ── DANE ZEWNĘTRZNE (poza Yahoo Finance) ────────────────────
+enrichment:
+
+  # Dane makroekonomiczne
+  macro:
+    enabled: true
+    # FRED API (darmowy klucz): https://fred.stlouisfed.org/docs/api/api_key.html
+    # Bez klucza: używa Yahoo Finance jako proxy (VIX, krzywa rentowności)
+    fred_api_key_env: "FRED_API_KEY"   # export FRED_API_KEY=twój_klucz
+    # World Bank działa bez klucza API
+
+  # Transakcje insiderów (SEC EDGAR, tylko spółki USA)
+  insider:
+    enabled: true
+    lookback_days: 90      # Analizuj transakcje z ostatnich N dni
+    # Filtr: odrzuć spółki gdzie insiderzy netto sprzedają
+    min_insider_buy_ratio: null   # null = brak filtra, 0.4 = min 40% kupna
+
+  # Sentyment wiadomości
+  sentiment:
+    enabled: true
+    lookback_days: 30
+    # Alpha Vantage (25 req/dzień darmowo): https://www.alphavantage.co/support/#api-key
+    alpha_vantage_key_env: "ALPHA_VANTAGE_KEY"   # opcjonalny
+    # Bez klucza: używa darmowych RSS feedów (Yahoo Finance RSS)
+
+# Nowe metryki dostępne w filtrach i scoringu po włączeniu enrichment:
+#
+#  insider_buy_ratio     → 0.0–1.0  (0.5=neutral, >0.7=silne kupno)
+#  news_sentiment        → -1.0–1.0 (>0=pozytywny, <0=negatywny)
+#  macro_regime_score    → 0.0–1.0  (>0.6=risk-on, <0.4=risk-off)
+#  vix                   → bieżący VIX
+#  yield_curve_10y2y     → spread w % (ujemny = inwersja)
+#  em_gdp_in / em_gdp_br → wzrost PKB Indii / Brazylii (%)

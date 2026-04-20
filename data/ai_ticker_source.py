@@ -319,6 +319,130 @@ Return a JSON object: {{"tickers": [exactly {n} yfinance-verified ticker symbols
 
 Verify each ticker works with yf.Ticker(symbol) before including it."""
 
+    @staticmethod
+    def emerging_growth(n: int = 45) -> str:
+        """
+        Rynki wschodzące + małe i średnie spółki wzrostowe — wysoki potencjał zwrotu.
+        Strategia dla inwestorów akceptujących wyższe ryzyko przy asymetrycznym upside.
+        """
+        return f"""Identify exactly {n} publicly traded companies from Emerging and Frontier Markets \
+or small/mid-cap growth companies globally with exceptional return potential. \
+These are companies where the risk/reward ratio is highly asymmetric — limited downside \
+relative to potential multi-bagger upside.
+
+TARGET UNIVERSE (mandatory geographic distribution):
+   — India (NSE/BSE): 10–12 companies (suffix .NS)
+     Focus: financials, consumer, IT services, specialty chemicals, pharma
+   — Southeast Asia: 5–7 companies (Indonesia, Vietnam, Philippines, Thailand, Malaysia)
+     Use Singapore-listed proxies (.SI) or US-listed ADRs where direct access limited
+   — Latin America: 5–7 companies
+     Brazil (.SA): commodities, fintech, e-commerce; Mexico: nearshoring beneficiaries
+   — Middle East & Africa: 3–4 companies
+     Saudi Arabia, UAE, South Africa, Nigeria; use US-listed ADRs if direct unavailable
+   — Eastern Europe & Turkey: 2–3 companies
+   — China & HK: 4–6 companies (.HK) — focus on domestic consumption, not export
+   — Small/Mid-cap Global (sub-$5B, high growth): 5–8 companies from any country
+
+SELECTION CRITERIA FOR EACH COMPANY:
+1. GROWTH ENGINE (primary filter)
+   — Revenue CAGR >20% over past 2–3 years, OR clear inflection point ahead
+   — Operating in market with structural tailwind (rising middle class, digitization,
+     infrastructure build-out, commodity super-cycle, healthcare access)
+   — First-mover or dominant player in an underpenetrated market
+
+2. QUALITY FLOOR (must pass all)
+   — Publicly listed and actively traded (daily volume >$500K USD equivalent)
+   — Not a state-owned enterprise with poor governance track record
+   — Audited by reputable firm; no major accounting controversies
+   — Net debt/EBITDA below 4x (higher allowed only for capital-intensive regulated industries)
+
+3. ASYMMETRIC RETURN PROFILE
+   — Identifiable catalyst that could 3–10× the business in 5 years
+   — Not already consensus/crowded (avoid mega-caps everyone already owns)
+   — Valuation reasonable for growth rate (PEG < 3, or price/sales < 10× for high-growth)
+
+4. RISK FACTORS TO CONSIDER (not to exclude, but to balance)
+   — Political/regulatory risk: weight toward countries with improving institutions
+   — Currency risk: prefer companies with USD or EUR revenue streams
+   — Liquidity risk: prefer primary listings on major exchanges over OTC
+
+YFINANCE TICKER FORMAT REMINDER:
+   India NSE: TICKER.NS   India BSE: TICKER.BO (prefer .NS)
+   Brazil: TICKER.SA      South Africa: TICKER.JO
+   Indonesia: TICKER.JK   Thailand: TICKER.BK
+   Turkey: TICKER.IS      Saudi: TICKER.SR
+   Hong Kong: TICKER.HK   Singapore: TICKER.SI
+   US-listed ADRs representing EM companies: plain ticker (NU, MELI, SE, GRAB, BABA)
+
+Include a MIX of: established EM large-caps with continued runway, emerging champions
+not yet on western investors' radar, and US-listed ADRs providing EM exposure with
+better liquidity.
+
+Return a JSON object: {{"tickers": [exactly {n} yfinance-verified ticker symbols]}}
+
+Verify each ticker works with yf.Ticker(symbol) before including it."""
+
+    @staticmethod
+    def asymmetric_risk(n: int = 35) -> str:
+        """
+        Okazje inwestycyjne z asymetrycznym profilem ryzyko/zwrot.
+        Spółki o potencjale bardzo dużego zwrotu, z wyważonym (nie spekulacyjnym) ryzykiem.
+        """
+        return f"""Identify exactly {n} publicly traded companies offering the most compelling \
+asymmetric risk/reward investment opportunities available today. \
+These are situations where potential upside significantly exceeds downside risk — \
+but based on fundamental analysis, not speculation.
+
+ASYMMETRIC OPPORTUNITY TYPES (include mix of all):
+
+TYPE A — MISUNDERSTOOD QUALITY (30% of selections)
+   High-quality businesses temporarily trading at distressed valuations due to:
+   • Cyclical downturn in their industry that will reverse
+   • One-time legal, regulatory, or accounting concern being resolved
+   • Spin-off, restructuring, or management change not yet reflected in price
+   • Mistakenly grouped with lower-quality peers (conglomerate discount)
+   Criterion: intrinsic value clearly above current price by 40–100%
+
+TYPE B — EMERGING DOMINANT PLAYERS (35% of selections)
+   Companies in the early stages of becoming category leaders:
+   • Capturing market share rapidly from incumbents
+   • Network effect or switching cost moat just becoming apparent
+   • Geographic expansion from proven home market into new regions
+   • Revenue inflection from investment phase to profitability
+   Criterion: TAM large enough to support 5–10× current revenue in 10 years
+
+TYPE C — CATALYST-DRIVEN RECOVERIES (20% of selections)
+   Companies where a specific near-term catalyst could dramatically re-rate the stock:
+   • Drug approval, regulatory clearance, contract win
+   • Asset monetization (real estate, IP licensing, subsidiary IPO)
+   • Activist investor involvement driving operational improvement
+   • Post-merger synergies not yet in consensus estimates
+   Criterion: identifiable catalyst within 12–24 months
+
+TYPE D — STRUCTURAL DISRUPTORS (15% of selections)
+   Smaller companies with technology or business model innovation that threatens
+   large incumbents — but already generating real revenue and approaching profitability:
+   • Fintech disrupting traditional banking in underbanked markets
+   • Healthcare companies reducing cost or improving access at scale
+   • Industrial tech improving efficiency in legacy industries
+   Criterion: >$300M revenue or >$1B market cap (not pre-revenue)
+
+RISK MANAGEMENT REQUIREMENTS:
+   — Every company must be PROFITABLE or within 18 months of profitability
+   — Maximum position concentration: no single country >30%
+   — Minimum liquidity: $500K daily trading volume
+   — Exclude: leveraged buyouts, CLOs, pure commodity plays without value-add,
+     companies dependent on a single contract or customer (>50% revenue)
+
+GEOGRAPHIC MIX:
+   Developed markets (US, Europe, Japan, Australia): 40–50%
+   Emerging markets: 35–45%
+   Frontier markets: 5–15%
+
+Return a JSON object: {{"tickers": [exactly {n} yfinance-verified ticker symbols]}}
+
+Verify each ticker works with yf.Ticker(symbol) before including it."""
+
     @classmethod
     def get_prompt(cls, strategy: str, n: int, **kwargs) -> str:
         """Pobierz prompt dla wybranej strategii."""
@@ -329,6 +453,8 @@ Verify each ticker works with yf.Ticker(symbol) before including it."""
             "sector_leaders":    lambda: cls.sector_leaders(n, kwargs.get("sector", "technology")),
             "thematic":          lambda: cls.thematic(n, kwargs.get("theme", "artificial intelligence")),
             "global_diversified": lambda: cls.global_diversified(n),
+            "emerging_growth":   lambda: cls.emerging_growth(n),
+            "asymmetric_risk":   lambda: cls.asymmetric_risk(n),
         }
         fn = strategies.get(strategy)
         if not fn:
@@ -773,15 +899,18 @@ class AITickerSource:
         - Standardowy: jedno zapytanie, retry przy błędzie
         - Multi-shot: N zapytań z różnymi temperaturami, unia wyników
         """
+        macro_context = self.config.get("macro_context")
         if self.multi_shot:
             return self._fetch_multi_shot()
         else:
-            result = self._fetch_single()
+            result = self._fetch_single(macro_context=macro_context)
             return result.tickers
 
-    def _fetch_single(self, temperature_override: float | None = None) -> AIRunResult:
+    def _fetch_single(self, temperature_override: float | None = None,
+                      macro_context: str | None = None) -> AIRunResult:
         """Jedno zapytanie z obsługą retry."""
         system_prompt = PromptLibrary.SYSTEM_PROMPT
+
         # Feedback loop: wstrzyknij listę niedziałających tickerów
         if self.avoid_tickers:
             avoid_str = ", ".join(self.avoid_tickers[:40])
@@ -792,6 +921,16 @@ class AITickerSource:
                 f"Do NOT include any of these in your response:\n{avoid_str}"
             )
             logger.info(f"Feedback loop: {len(self.avoid_tickers)} tickerów do unikania wstrzykniętych do promptu")
+
+        # Kontekst makroekonomiczny
+        if macro_context:
+            system_prompt += (
+                f"\n\nCURRENT MACROECONOMIC CONTEXT (use to calibrate selections):\n"
+                f"{macro_context}\n"
+                f"Adjust your selections based on this macro environment. "
+                f"In risk-off regimes prefer quality and defensives. "
+                f"In risk-on regimes with strong EM growth, lean into growth and EM exposure."
+            )
 
         user_prompt = PromptLibrary.get_prompt(
             self.strategy,

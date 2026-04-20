@@ -42,6 +42,7 @@ def _validate_config(config: dict) -> None:
     valid_strategies = {
         "growth_quality", "deep_value", "compounders",
         "sector_leaders", "thematic", "global_diversified",
+        "emerging_growth", "asymmetric_risk",
     }
     strategy = config.get("source", {}).get("strategy", "growth_quality")
     if strategy not in valid_strategies:

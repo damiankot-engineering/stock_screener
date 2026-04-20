@@ -193,6 +193,59 @@ class TickerValidationCache(Base):
         status = "✓" if self.is_valid else "✗"
         return f"<TickerValidation {status} {self.ticker} @ {self.checked_at:%Y-%m-%d}>"
 
+
+# ─────────────────────────────────────────────────────────────
+# Tabela 6: Snapshoty danych makroekonomicznych
+# ─────────────────────────────────────────────────────────────
+
+class MacroDataSnapshot(Base):
+    """
+    Bieżące dane makroekonomiczne — zapisywane przy każdym runie.
+    Pozwala śledzić jak środowisko makro zmieniało się między screeningami.
+    """
+    __tablename__ = "macro_snapshots"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    run_id              = Column(Integer, ForeignKey("screening_runs.id"), nullable=True)
+    recorded_at         = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    yield_curve_10y2y   = Column(Float, nullable=True)
+    fed_funds_rate      = Column(Float, nullable=True)
+    us_cpi_yoy          = Column(Float, nullable=True)
+    vix                 = Column(Float, nullable=True)
+    dxy                 = Column(Float, nullable=True)
+    macro_regime_score  = Column(Float, nullable=True)
+    em_gdp_json         = Column(Text, nullable=True)   # JSON: {country: gdp_growth}
+    em_inflation_json   = Column(Text, nullable=True)
+
+    def __repr__(self):
+        return (f"<MacroSnapshot regime={self.macro_regime_score} "
+                f"VIX={self.vix} @ {self.recorded_at:%Y-%m-%d}>")
+
+
+# ─────────────────────────────────────────────────────────────
+# Tabela 7: Cache sygnałów insiderów
+# ─────────────────────────────────────────────────────────────
+
+class InsiderSignalCache(Base):
+    """
+    Cache transakcji insiderów z SEC EDGAR Form 4.
+    Odświeżany przy każdym runie — dane zmieniają się rzadziej niż ceny.
+    """
+    __tablename__ = "insider_signal_cache"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    ticker      = Column(String(20), nullable=False, unique=True, index=True)
+    buys        = Column(Integer, default=0)
+    sells       = Column(Integer, default=0)
+    net_shares  = Column(Integer, default=0)
+    buy_ratio   = Column(Float, nullable=True)
+    checked_at  = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return (f"<InsiderSignal {self.ticker} "
+                f"buy_ratio={self.buy_ratio} buys={self.buys} sells={self.sells}>")
+
+
 def create_db_engine(db_path: str):
     """
     Utwórz silnik SQLAlchemy dla bazy SQLite.

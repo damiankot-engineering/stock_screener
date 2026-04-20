@@ -13,7 +13,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +128,7 @@ class DataFetcher:
 
     def _fetch_one(self, ticker: str) -> TickerData:
         """Pobierz dane dla jednego tickera."""
+        import yfinance as yf
         yticker = yf.Ticker(ticker)
 
         info = {}
