@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from .models import (
     MetricSnapshot, PortfolioSnapshot,
     ScreeningResult, ScreeningRun,
+    TickerValidationCache,
 )
 
 logger = logging.getLogger(__name__)
@@ -386,3 +387,80 @@ class ScreenerRepository:
         """Ile uruchomień jest w bazie."""
         with self._session_factory() as session:
             return session.query(ScreeningRun).count()
+
+    # ─────────────────────────────────────────────────────────
+    # Cache walidacji tickerów
+    # ─────────────────────────────────────────────────────────
+
+    def get_validation_cache(
+        self, tickers: list[str], since: "datetime"
+    ) -> list[dict]:
+        """Zwróć świeże wpisy cache dla podanych tickerów (w ramach TTL)."""
+        from datetime import datetime
+        with self._session_factory() as session:
+            rows = (
+                session.query(TickerValidationCache)
+                .filter(
+                    TickerValidationCache.ticker.in_(tickers),
+                    TickerValidationCache.checked_at >= since,
+                )
+                .all()
+            )
+            return [
+                {
+                    "ticker":   r.ticker,
+                    "is_valid": r.is_valid,
+                    "reason":   r.reason,
+                    "last_price": r.last_price,
+                    "market_cap": r.market_cap,
+                    "checked_at": r.checked_at,
+                }
+                for r in rows
+            ]
+
+    def upsert_validation_cache(self, rows: list[dict]) -> None:
+        """
+        Zapisz lub zaktualizuj wyniki walidacji w cache.
+        UPSERT: jeśli ticker już istnieje — nadpisz (to jedyne miejsce,
+        gdzie nadpisujemy dane — cache z natury jest mutowalny).
+        """
+        from datetime import datetime
+        with self._session_factory() as session:
+            for row in rows:
+                existing = (
+                    session.query(TickerValidationCache)
+                    .filter_by(ticker=row["ticker"])
+                    .first()
+                )
+                if existing:
+                    existing.is_valid   = row["is_valid"]
+                    existing.reason     = row["reason"]
+                    existing.last_price = row.get("last_price")
+                    existing.market_cap = row.get("market_cap")
+                    existing.checked_at = row.get("checked_at", datetime.utcnow())
+                else:
+                    session.add(TickerValidationCache(
+                        ticker=row["ticker"],
+                        is_valid=row["is_valid"],
+                        reason=row["reason"],
+                        last_price=row.get("last_price"),
+                        market_cap=row.get("market_cap"),
+                        checked_at=row.get("checked_at", datetime.utcnow()),
+                    ))
+            session.commit()
+        logger.debug(f"Cache walidacji: zapisano {len(rows)} wpisów")
+
+    def get_invalid_tickers(self, limit: int = 50) -> list[str]:
+        """
+        Zwróć listę tickerów, które konsekwentnie nie przechodzą walidacji.
+        Używane jako feedback loop dla AI (lista do unikania w promptach).
+        """
+        with self._session_factory() as session:
+            rows = (
+                session.query(TickerValidationCache.ticker)
+                .filter(TickerValidationCache.is_valid == False)  # noqa: E712
+                .order_by(TickerValidationCache.checked_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [r[0] for r in rows]

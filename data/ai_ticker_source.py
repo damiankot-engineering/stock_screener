@@ -747,6 +747,8 @@ class AITickerSource:
         self.max_retries = ai_config.get("max_retries", 3)
         self.multi_shot = ai_config.get("multi_shot", False)
         self.multi_shot_runs = ai_config.get("multi_shot_runs", 3)
+        # Feedback loop: tickery znane jako niedostępne w yfinance
+        self.avoid_tickers: list[str] = ai_config.get("avoid_tickers", [])
 
         self._extra_kwargs = {
             k: v for k, v in ai_config.items()
@@ -780,6 +782,17 @@ class AITickerSource:
     def _fetch_single(self, temperature_override: float | None = None) -> AIRunResult:
         """Jedno zapytanie z obsługą retry."""
         system_prompt = PromptLibrary.SYSTEM_PROMPT
+        # Feedback loop: wstrzyknij listę niedziałających tickerów
+        if self.avoid_tickers:
+            avoid_str = ", ".join(self.avoid_tickers[:40])
+            system_prompt += (
+                f"\n\nCRITICAL — FEEDBACK FROM PREVIOUS RUNS:\n"
+                f"The following symbols were previously returned by you but are NOT available "
+                f"on Yahoo Finance (yf.Ticker returned no data). "
+                f"Do NOT include any of these in your response:\n{avoid_str}"
+            )
+            logger.info(f"Feedback loop: {len(self.avoid_tickers)} tickerów do unikania wstrzykniętych do promptu")
+
         user_prompt = PromptLibrary.get_prompt(
             self.strategy,
             self.n_tickers,

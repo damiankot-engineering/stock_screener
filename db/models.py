@@ -167,8 +167,31 @@ class PortfolioSnapshot(Base):
 
 
 # ─────────────────────────────────────────────────────────────
-# Fabryka silnika i sesji
+# Tabela 5: Cache walidacji tickerów
 # ─────────────────────────────────────────────────────────────
+
+class TickerValidationCache(Base):
+    """
+    Przechowuje wynik walidacji tickera przez yfinance.
+    Działa jako cache z TTL — unikamy ponownego odpytywania Yahoo Finance
+    dla tickerów, które sprawdzaliśmy niedawno.
+
+    Tickery invalid służą też jako feedback loop dla AI:
+    są wstrzykiwane do kolejnych promptów jako lista do unikania.
+    """
+    __tablename__ = "ticker_validation_cache"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    ticker     = Column(String(20), nullable=False, unique=True, index=True)
+    is_valid   = Column(Boolean, nullable=False)
+    reason     = Column(String(50), nullable=False)   # "ok" | "no_price" | "fetch_error"
+    last_price = Column(Float, nullable=True)
+    market_cap = Column(Float, nullable=True)
+    checked_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        status = "✓" if self.is_valid else "✗"
+        return f"<TickerValidation {status} {self.ticker} @ {self.checked_at:%Y-%m-%d}>"
 
 def create_db_engine(db_path: str):
     """

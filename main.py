@@ -53,6 +53,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config.settings import load_config, setup_logging
 from data.ticker_source import get_tickers
 from data.fetcher import DataFetcher
+from data.ticker_validator import TickerValidator
 from db.models import create_db_engine, get_session_factory
 from db.repository import ScreenerRepository
 from screening.filter_engine import FilterEngine
@@ -77,6 +78,12 @@ class ScreenerPipeline:
 
         self.repository     = ScreenerRepository(session_factory)
         self.fetcher        = DataFetcher(config)
+        self.validator      = TickerValidator(
+            repository=self.repository,
+            workers=settings.get("fetch_workers", 10),
+            api_delay=settings.get("api_delay_seconds", 0.1),
+            cache_ttl_days=settings.get("validation_cache_ttl_days", 30),
+        )
         self.filter_engine  = FilterEngine(config)
         self.scorer         = Scorer(config)
         self.portfolio_builder = PortfolioBuilder(config, repository=self.repository)
@@ -100,11 +107,26 @@ class ScreenerPipeline:
         n_tickers  = source_config.get("ai", {}).get("n_tickers", 50)
         source_name = f"ai_{strategy}"
 
-        # ── 1: AI generuje tickery ────────────────────────────
+        # ── 1: AI generuje tickery (z feedback loop z DB) ────
         logger.info("=" * 60)
         logger.info(f"KROK 1: AI Ticker Source [backend={backend}, strategia={strategy}, n={n_tickers}]")
-        tickers = get_tickers(source_config)
+        # Wstrzyknij do promptu tickery znane jako niedziałające w yfinance
+        invalid_known = self.repository.get_invalid_tickers(limit=50)
+        if invalid_known:
+            source_config.setdefault("ai", {})["avoid_tickers"] = invalid_known
+            logger.info(f"Feedback loop: {len(invalid_known)} znanych złych tickerów dodanych do promptu AI")
+        tickers_raw = get_tickers(source_config)
+
+        # ── 1b: Walidacja tickerów przez yfinance ─────────────
+        logger.info("=" * 60)
+        logger.info(f"KROK 1b: Walidacja {len(tickers_raw)} tickerów przez yfinance")
+        tickers, invalid = self.validator.validate_batch(tickers_raw)
+        self._print_validation_summary(tickers_raw, tickers, invalid)
         self.reporter.print_header(f"AI:{strategy}@{backend}", len(tickers))
+
+        if not tickers:
+            logger.error("Żaden ticker nie przeszedł walidacji yfinance!")
+            return {"run_id": None, "passed": 0}
 
         # ── 2: Pobierz dane fundamentalne + techniczne ────────
         logger.info("=" * 60)
@@ -298,6 +320,18 @@ class ScreenerPipeline:
     def schedule(self) -> None:
         from scheduler.runner import start_scheduler
         start_scheduler(self.run, self.config.get("scheduler", {}))
+
+    def _print_validation_summary(
+        self, raw: list[str], valid: list[str], invalid: list[str]
+    ) -> None:
+        pct = len(valid) / len(raw) * 100 if raw else 0
+        logger.info(
+            f"Walidacja: {len(valid)}/{len(raw)} valid ({pct:.0f}%)  "
+            f"odrzucone: {len(invalid)}"
+        )
+        if invalid:
+            sample = ", ".join(invalid[:8]) + ("…" if len(invalid) > 8 else "")
+            logger.warning(f"Niedziałające tickery (zapisane w DB): {sample}")
 
     def _finalize_run(self, run_id: int, passed: int, duration: float) -> None:
         from db.models import ScreeningRun
