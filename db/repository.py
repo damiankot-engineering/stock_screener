@@ -143,9 +143,9 @@ class ScreenerRepository:
 
     def save_portfolio(
         self,
-        run_id: int,
         portfolio: list[dict],
         previous_tickers: set[str] | None = None,
+        run_id: int | None = None,
     ) -> int:
         """
         Zapisz skład portfela inwestycyjnego.
@@ -156,6 +156,15 @@ class ScreenerRepository:
             previous_tickers: zbiór tickerów z poprzedniego portfela (dla is_new_entry)
         """
         prev = previous_tickers or set()
+
+        # Jeśli run_id=None (portfel historyczny niezwiązany z konkretnym run'em),
+        # użyj ID ostatniego runu lub 0 jako placeholder
+        if run_id is None:
+            with self._session_factory() as session:
+                last = (session.query(ScreeningRun)
+                        .order_by(ScreeningRun.run_timestamp.desc())
+                        .first())
+                run_id = last.id if last else 0
         rows = []
         for p in portfolio:
             rows.append({
@@ -178,6 +187,55 @@ class ScreenerRepository:
     # ─────────────────────────────────────────────────────────
     # Operacje odczytu – analiza historyczna
     # ─────────────────────────────────────────────────────────
+
+    def get_screening_history(self, n_last_runs: int | None = None) -> pd.DataFrame:
+        """
+        Pobierz pełną historię wyników screeningu z N ostatnich runów.
+        Używana przez PortfolioBuilder do budowy portfela historycznego.
+
+        Returns:
+            DataFrame z kolumnami: ticker, score, rank, run_id, run_timestamp
+        """
+        with self._session_factory() as session:
+            if n_last_runs:
+                last_runs = (
+                    session.query(ScreeningRun.id)
+                    .order_by(ScreeningRun.run_timestamp.desc())
+                    .limit(n_last_runs)
+                    .all()
+                )
+                run_ids = [r[0] for r in last_runs]
+                query = (
+                    session.query(
+                        ScreeningResult.ticker,
+                        ScreeningResult.score,
+                        ScreeningResult.rank,
+                        ScreeningResult.run_id,
+                        ScreeningRun.run_timestamp,
+                    )
+                    .join(ScreeningRun)
+                    .filter(ScreeningResult.run_id.in_(run_ids))
+                    .order_by(ScreeningRun.run_timestamp.asc())
+                )
+            else:
+                query = (
+                    session.query(
+                        ScreeningResult.ticker,
+                        ScreeningResult.score,
+                        ScreeningResult.rank,
+                        ScreeningResult.run_id,
+                        ScreeningRun.run_timestamp,
+                    )
+                    .join(ScreeningRun)
+                    .order_by(ScreeningRun.run_timestamp.asc())
+                )
+
+            rows = query.all()
+
+        if not rows:
+            return pd.DataFrame(columns=["ticker", "score", "rank", "run_id", "run_timestamp"])
+
+        return pd.DataFrame(rows, columns=["ticker", "score", "rank", "run_id", "run_timestamp"])
 
     def get_all_runs(self) -> pd.DataFrame:
         """Zwróć historię wszystkich uruchomień jako DataFrame."""

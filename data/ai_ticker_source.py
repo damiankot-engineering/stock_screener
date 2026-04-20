@@ -28,7 +28,6 @@ import logging
 import os
 import re
 import time
-import requests
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,20 +47,38 @@ class PromptLibrary:
     """
 
     # Szablon systemowy wspólny dla wszystkich strategii
-    SYSTEM_PROMPT = """You are a senior equity research analyst with 20+ years of experience 
-covering global stock markets across all sectors and geographies. You have deep expertise in 
-fundamental analysis, competitive dynamics, and identifying companies with durable competitive 
-advantages. Your recommendations are used by professional investors and must be actionable and 
+    SYSTEM_PROMPT = """You are a senior equity research analyst with 20+ years of experience \
+covering global stock markets across all sectors and geographies. You have deep expertise in \
+fundamental analysis, competitive dynamics, and identifying companies with durable competitive \
+advantages. Your recommendations are used by professional investors and must be actionable and \
 grounded in verifiable financial metrics.
 
 CRITICAL OUTPUT RULES:
-- Return ONLY a valid JSON array of ticker symbols — no prose, no markdown, no explanation
-- Use Yahoo Finance ticker format exactly: US stocks use plain symbols (AAPL, MSFT), 
-  European stocks use exchange suffix (.AS=Amsterdam, .PA=Paris, .DE=Frankfurt, .L=London, 
-  .MI=Milan, .SW=Zurich), Asian stocks use (.T=Tokyo, .HK=HongKong, .SS=Shanghai, .KS=Korea)
-- Every ticker must be currently traded on a major exchange
-- Do not include delisted, OTC-only, or unverifiable symbols
-- If a company has multiple share classes, return only the most liquid class"""
+- Return ONLY a valid JSON object with a single key "tickers" containing an array of strings
+- Example: {"tickers": ["AAPL", "MSFT", "ASML.AS"]}
+- Use Yahoo Finance (yfinance) ticker format exactly — every symbol MUST be retrievable via \
+yf.Ticker(symbol).info without errors:
+    • US stocks: plain uppercase symbols (AAPL, MSFT, BRK-B, not BRK.B)
+    • Amsterdam: suffix .AS  (ASML.AS, HEIA.AS)
+    • Paris:     suffix .PA  (MC.PA, TTE.PA)
+    • Frankfurt: suffix .DE  (SAP.DE, SIE.DE)
+    • London:    suffix .L   (AZN.L, SHEL.L)
+    • Milan:     suffix .MI  (ENI.MI)
+    • Zurich:    suffix .SW  (NESN.SW, NOVN.SW)
+    • Copenhagen:suffix .CO  (NOVO-B.CO)
+    • Tokyo:     suffix .T   (7203.T, 6758.T)
+    • Hong Kong: suffix .HK  (700.HK, 9988.HK)
+    • Korea:     suffix .KS  (005930.KS)
+    • Taiwan:    suffix .TW  (2330.TW)
+    • India NSE: suffix .NS  (RELIANCE.NS, INFY.NS)
+    • India BSE: suffix .BO  (use .NS instead when available)
+    • Australia: suffix .AX  (CBA.AX, BHP.AX)
+    • Brazil:    suffix .SA  (VALE3.SA, PETR4.SA)
+- VERIFY mentally that each ticker is actively traded and has yfinance data coverage
+- Do NOT include: ETFs, mutual funds, SPACs, closed-end funds, OTC-only stocks, \
+  recently IPO'd companies with <1 year of data, or delisted companies
+- If a company has multiple share classes, always use the most liquid, \
+  most widely tracked class (e.g. NOVO-B.CO not NOVO-A.CO)"""
 
     @staticmethod
     def growth_quality(n: int = 50) -> str:
@@ -103,8 +120,10 @@ MANDATORY DIVERSITY REQUIREMENTS:
 GEOGRAPHIC COVERAGE TARGET:
    North America 40–50%, Europe 20–25%, Asia-Pacific 15–20%, Rest of World 5–10%
 
-Return a JSON array of exactly {n} ticker symbols.
-Example format: ["AAPL", "MSFT", "ASML.AS", "NOVO-B.CO", "HDFC.NS", "6098.T"]"""
+Return a JSON object with key "tickers" containing exactly {n} yfinance-verified symbols.
+Example: {{"tickers": ["AAPL", "MSFT", "ASML.AS", "NOVO-B.CO", "RELIANCE.NS", "6098.T"]}}
+
+Double-check: every symbol you return must work with yf.Ticker(symbol).info"""
 
     @staticmethod
     def deep_value(n: int = 40) -> str:
@@ -142,7 +161,9 @@ DEEP VALUE CRITERIA:
 DIVERSITY: Include companies from at least 5 countries and 5 sectors.
 Preference for companies with insider buying or significant share buybacks.
 
-Return a JSON array of exactly {n} ticker symbols."""
+Return a JSON object: {{"tickers": [exactly {n} yfinance-verified ticker symbols]}}
+
+Verify each ticker works with yf.Ticker(symbol) before including it."""
 
     @staticmethod
     def compounders(n: int = 30) -> str:
@@ -178,7 +199,9 @@ emerging compounder candidates with all the hallmarks but earlier in their journ
 
 At least 10 companies must be non-US.
 
-Return a JSON array of exactly {n} ticker symbols."""
+Return a JSON object: {{"tickers": [exactly {n} yfinance-verified ticker symbols]}}
+
+Verify each ticker works with yf.Ticker(symbol) before including it."""
 
     @staticmethod
     def sector_leaders(n: int = 40, sector: str = "technology") -> str:
@@ -219,7 +242,9 @@ QUALITY FILTERS:
 GLOBAL SCOPE: Include sector leaders from the US, Europe, Asia, and rest of world.
 Do NOT limit to US-listed companies only.
 
-Return a JSON array of exactly {n} ticker symbols."""
+Return a JSON object: {{"tickers": [exactly {n} yfinance-verified ticker symbols]}}
+
+Verify each ticker works with yf.Ticker(symbol) before including it."""
 
     @staticmethod
     def thematic(n: int = 35, theme: str = "artificial intelligence") -> str:
@@ -250,7 +275,9 @@ QUALITY STANDARDS:
 AVOID: Marketing gimmicks — companies that rebranded for the theme with no 
 fundamental business change, or companies with only superficial exposure.
 
-Return a JSON array of exactly {n} ticker symbols."""
+Return a JSON object: {{"tickers": [exactly {n} yfinance-verified ticker symbols]}}
+
+Verify each ticker works with yf.Ticker(symbol) before including it."""
 
     @staticmethod
     def global_diversified(n: int = 60) -> str:
@@ -288,7 +315,9 @@ SELECTION PHILOSOPHY:
    and identifiable competitive advantages. Seek to represent the global economy's 
    best opportunities across cycles.
 
-Return a JSON array of exactly {n} ticker symbols."""
+Return a JSON object: {{"tickers": [exactly {n} yfinance-verified ticker symbols]}}
+
+Verify each ticker works with yf.Ticker(symbol) before including it."""
 
     @classmethod
     def get_prompt(cls, strategy: str, n: int, **kwargs) -> str:
@@ -342,7 +371,7 @@ class GroqBackend(LLMBackend):
     API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
-        self._api_key = api_key or os.getenv("GROQ_API_KEY", "")
+        self._api_key = (api_key or os.getenv("GROQ_API_KEY", "")).strip()
         self._model = model or self.DEFAULT_MODEL
 
         if not self._api_key:
@@ -358,27 +387,28 @@ class GroqBackend(LLMBackend):
         return f"Groq/{self._model}"
 
     def call(self, system_prompt: str, user_prompt: str, temperature: float = 0.3) -> str:
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": 2048,
-            "response_format": {"type": "json_object"},  # Groq JSON mode
-        }
+        import requests
 
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        
-        resp = requests.post(self.API_URL, json=payload, headers=headers, timeout=60)
+        resp = requests.post(
+            self.API_URL,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self._model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                "temperature": temperature,
+                "max_tokens": 2048,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=60,
+        )
         resp.raise_for_status()
-        data = resp.json()
-
-        return data["choices"][0]["message"]["content"]
+        return resp.json()["choices"][0]["message"]["content"]
 
 
 class AnthropicBackend(LLMBackend):
@@ -394,7 +424,7 @@ class AnthropicBackend(LLMBackend):
     API_URL = "https://api.anthropic.com/v1/messages"
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
-        self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+        self._api_key = (api_key or os.getenv("ANTHROPIC_API_KEY", "")).strip()
         self._model = model or self.DEFAULT_MODEL
 
         if not self._api_key:
@@ -407,25 +437,26 @@ class AnthropicBackend(LLMBackend):
         return f"Anthropic/{self._model}"
 
     def call(self, system_prompt: str, user_prompt: str, temperature: float = 0.3) -> str:
-        payload = {
-            "model": self._model,
-            "max_tokens": 2048,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": user_prompt}],
-            "temperature": temperature,
-        }
+        import requests
 
-        headers = {
-            "x-api-key": self._api_key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-        }
-        
-        resp = requests.post(self.API_URL, json=payload, headers=headers, timeout=60)
+        resp = requests.post(
+            self.API_URL,
+            headers={
+                "x-api-key": self._api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self._model,
+                "max_tokens": 2048,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": user_prompt}],
+                "temperature": temperature,
+            },
+            timeout=60,
+        )
         resp.raise_for_status()
-        data = resp.json()
-
-        return data["content"][0]["text"]
+        return resp.json()["content"][0]["text"]
 
 
 class OpenAIBackend(LLMBackend):
@@ -438,7 +469,7 @@ class OpenAIBackend(LLMBackend):
     API_URL = "https://api.openai.com/v1/chat/completions"
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
-        self._api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+        self._api_key = (api_key or os.getenv("OPENAI_API_KEY", "")).strip()
         self._model = model or self.DEFAULT_MODEL
         if not self._api_key:
             raise ValueError("Brak OPENAI_API_KEY.")
@@ -448,27 +479,28 @@ class OpenAIBackend(LLMBackend):
         return f"OpenAI/{self._model}"
 
     def call(self, system_prompt: str, user_prompt: str, temperature: float = 0.3) -> str:
-        payload = {
-            "model": self._model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": 2048,
-            "response_format": {"type": "json_object"},
-        }
+        import requests
 
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        
-        resp = requests.post(self.API_URL, json=payload, headers=headers, timeout=60)
+        resp = requests.post(
+            self.API_URL,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self._model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                "temperature": temperature,
+                "max_tokens": 2048,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=60,
+        )
         resp.raise_for_status()
-        data = resp.json()
-
-        return data["choices"][0]["message"]["content"]
+        return resp.json()["choices"][0]["message"]["content"]
 
 
 class MockBackend(LLMBackend):
@@ -523,7 +555,8 @@ class BackendFactory:
     @classmethod
     def create(cls, ai_config: dict) -> LLMBackend:
         backend_name = os.getenv("AI_BACKEND") or ai_config.get("backend", "groq")
-        api_key = os.getenv(ai_config.get("api_key_env", "GROQ_API_KEY")) or ai_config.get("api_key")
+        api_key_raw = os.getenv(ai_config.get("api_key_env", "GROQ_API_KEY")) or ai_config.get("api_key")
+        api_key = api_key_raw.strip() if api_key_raw else None
         model = ai_config.get("model")
 
         backend_cls = cls._registry.get(backend_name.lower())

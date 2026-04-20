@@ -78,7 +78,7 @@ pip install -r requirements.txt
 #    → https://console.groq.com → API Keys → Create API Key
 
 # 3. Ustaw klucz API
-export GROQ_API_KEY=gsk_twój_klucz
+export GROQ_API_KEY=gsk_twój_klucz_tutaj
 
 # 4. Uruchomienie
 python main.py                                       # domyślna strategia (growth_quality, 50 spółek)
