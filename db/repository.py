@@ -159,13 +159,24 @@ class ScreenerRepository:
         prev = previous_tickers or set()
 
         # Jeśli run_id=None (portfel historyczny niezwiązany z konkretnym run'em),
-        # użyj ID ostatniego runu lub 0 jako placeholder
+        # utwórz dedykowany rekord ScreeningRun — nigdy nie używaj run_id=0,
+        # bo narusza FK constraint (PortfolioSnapshot.run_id → screening_runs.id).
         if run_id is None:
             with self._session_factory() as session:
-                last = (session.query(ScreeningRun)
-                        .order_by(ScreeningRun.run_timestamp.desc())
-                        .first())
-                run_id = last.id if last else 0
+                portfolio_run = ScreeningRun(
+                    run_timestamp=datetime.utcnow(),
+                    source_index="portfolio_build",
+                    total_tickers_fetched=len(portfolio),
+                    total_tickers_passed=len(portfolio),
+                    fetch_errors_count=0,
+                    duration_seconds=0.0,
+                    notes="Portfel historyczny — build bez screeningu",
+                )
+                session.add(portfolio_run)
+                session.commit()
+                session.refresh(portfolio_run)
+                run_id = portfolio_run.id
+
         rows = []
         for p in portfolio:
             rows.append({
@@ -201,6 +212,7 @@ class ScreenerRepository:
             if n_last_runs:
                 last_runs = (
                     session.query(ScreeningRun.id)
+                    .filter(ScreeningRun.source_index != "portfolio_build")
                     .order_by(ScreeningRun.run_timestamp.desc())
                     .limit(n_last_runs)
                     .all()
@@ -318,18 +330,26 @@ class ScreenerRepository:
         return agg.sort_values("frequency", ascending=False).reset_index(drop=True)
 
     def get_last_portfolio(self) -> set[str]:
-        """Pobierz tickery z ostatniego portfela (dla is_new_entry)."""
+        """
+        Pobierz tickery z ostatniego portfela (dla is_new_entry).
+
+        Szuka ostatniego run_id który faktycznie zawiera portfolio_snapshots,
+        nie ostatniego ScreeningRun — który mógł być run'em screeningowym bez
+        zapisanego portfela.
+        """
         with self._session_factory() as session:
-            last_run = (
-                session.query(ScreeningRun)
+            # Znajdź run_id z najnowszym portfolio_snapshot
+            last_portfolio_run = (
+                session.query(PortfolioSnapshot.run_id)
+                .join(ScreeningRun, PortfolioSnapshot.run_id == ScreeningRun.id)
                 .order_by(ScreeningRun.run_timestamp.desc())
                 .first()
             )
-            if not last_run:
+            if not last_portfolio_run:
                 return set()
             portfolio = (
                 session.query(PortfolioSnapshot.ticker)
-                .filter(PortfolioSnapshot.run_id == last_run.id)
+                .filter(PortfolioSnapshot.run_id == last_portfolio_run[0])
                 .all()
             )
             return {p[0] for p in portfolio}
@@ -384,9 +404,17 @@ class ScreenerRepository:
                                             "stability_score", "timestamp"])
 
     def get_run_count(self) -> int:
-        """Ile uruchomień jest w bazie."""
+        """
+        Ile uruchomień screeningu jest w bazie.
+        Nie liczy syntetycznych rekordów 'portfolio_build' — te są tworzone
+        przez save_portfolio() i nie reprezentują faktycznych screeningów.
+        """
         with self._session_factory() as session:
-            return session.query(ScreeningRun).count()
+            return (
+                session.query(ScreeningRun)
+                .filter(ScreeningRun.source_index != "portfolio_build")
+                .count()
+            )
 
     # ─────────────────────────────────────────────────────────
     # Cache walidacji tickerów
