@@ -130,3 +130,98 @@ settings:
   log_level: "INFO"
   price_history_days: 400
   max_fetch_errors: 3
+  validation_cache_ttl_days: 30
+  # Feedback loop — ile niedziałających tickerów pobrać z DB
+  # i wstrzyknąć do promptu AI (max 200 trafia do prompta, reszta
+  # jest w bazie jako rezerwa na wypadek dalszego rozszerzenia limitu)
+  feedback_loop_limit: 500
+
+# ── ZEWNĘTRZNE ŹRÓDŁA DANYCH ─────────────────────────────────
+external_data:
+
+  # FRED (Federal Reserve) – wskaźniki makroekonomiczne
+  # Klucz opcjonalny: https://fred.stlouisfed.org/docs/api/api_key.html
+  fred:
+    enabled: true
+    api_key_env: "FRED_API_KEY"   # opcjonalny; bez klucza: 120 req/min
+
+  # SEC EDGAR – insider transactions (tylko spółki US)
+  # Bez klucza, całkowicie darmowy
+  sec_edgar:
+    enabled: true
+    workers: 5
+
+  # OpenFIGI – walidacja i metadata tickerów
+  # Klucz opcjonalny: https://www.openfigi.com/api
+  # Bez klucza: 25 req/min (może być wolny przy dużej liście)
+  openfigi:
+    enabled: false
+    api_key_env: "OPENFIGI_API_KEY"
+
+
+# ── DANE ZEWNĘTRZNE (poza Yahoo Finance) ────────────────────
+enrichment:
+
+  # Dane makroekonomiczne
+  macro:
+    enabled: true
+    # FRED API (darmowy klucz): https://fred.stlouisfed.org/docs/api/api_key.html
+    # Bez klucza: używa Yahoo Finance jako proxy (VIX, krzywa rentowności)
+    fred_api_key_env: "FRED_API_KEY"   # export FRED_API_KEY=twój_klucz
+    # World Bank działa bez klucza API
+
+  # Transakcje insiderów (SEC EDGAR, tylko spółki USA)
+  insider:
+    enabled: true
+    lookback_days: 90      # Analizuj transakcje z ostatnich N dni
+    # Filtr: odrzuć spółki gdzie insiderzy netto sprzedają
+    min_insider_buy_ratio: null   # null = brak filtra, 0.4 = min 40% kupna
+
+  # Sentyment wiadomości
+  sentiment:
+    enabled: true
+    lookback_days: 30
+    # Alpha Vantage (25 req/dzień darmowo): https://www.alphavantage.co/support/#api-key
+    alpha_vantage_key_env: "ALPHA_VANTAGE_KEY"   # opcjonalny
+    # Bez klucza: używa darmowych RSS feedów (Yahoo Finance RSS)
+
+# Nowe metryki dostępne w filtrach i scoringu po włączeniu enrichment:
+#
+#  insider_buy_ratio     → 0.0–1.0  (0.5=neutral, >0.7=silne kupno)
+#  news_sentiment        → -1.0–1.0 (>0=pozytywny, <0=negatywny)
+#  macro_regime_score    → 0.0–1.0  (>0.6=risk-on, <0.4=risk-off)
+#  vix                   → bieżący VIX
+#  yield_curve_10y2y     → spread w % (ujemny = inwersja)
+#  em_gdp_in / em_gdp_br → wzrost PKB Indii / Brazylii (%)
+
+
+# ── ŹRÓDŁA DANYCH FINANSOWYCH ────────────────────────────────
+data_sources:
+
+  # Financial Modeling Prep — dane fundamentalne ze sprawozdań finansowych
+  # Darmowy plan: 250 req/dzień, klucz bez karty kredytowej
+  # Rejestracja: https://financialmodelingprep.com/register
+  # Pokrycie: wszystkie rynki, pełny zestaw wskaźników finansowych
+  fmp:
+    enabled: true
+    api_key_env: "FMP_API_KEY"    # export FMP_API_KEY=twój_klucz
+
+  # Stooq — historyczne dane cenowe (techniczne), całkowicie darmowy
+  # Bez klucza, bez limitu, pokrycie globalne
+  stooq:
+    enabled: true
+    api_delay: 0.2
+
+  # Yahoo Finance — fallback gdy FMP/Stooq nie mają danych
+  # Aktywny automatycznie — nie wymaga klucza
+  yfinance:
+    enabled: true
+
+# Priorytety dostawców:
+#   Fundamenty: FMP → yFinance
+#   Ceny/techniczne: Stooq → FMP → yFinance
+#
+# Płatne alternatywy (do dodania w przyszłości):
+#   Bloomberg Terminal: from data.providers.bloomberg import BloombergProvider
+#   Refinitiv Eikon:    from data.providers.refinitiv import RefinitivProvider
+#   FactSet:            from data.providers.factset import FactSetProvider

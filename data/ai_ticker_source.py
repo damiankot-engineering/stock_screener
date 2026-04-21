@@ -913,14 +913,37 @@ class AITickerSource:
 
         # Feedback loop: wstrzyknij listę niedziałających tickerów
         if self.avoid_tickers:
-            avoid_str = ", ".join(self.avoid_tickers[:40])
+            # Wstrzykuj do 200 tickerów — nowoczesne LLM obsługują długi kontekst,
+            # a lista rośnie z każdym runem. Ponad 200 to diminishing returns
+            # (AI i tak ignoruje dalekie końce listy przy bardzo dużych zbiorach).
+            PROMPT_INJECT_LIMIT = 200
+            inject_list = self.avoid_tickers[:PROMPT_INJECT_LIMIT]
+
+            # Formatuj w wierszach po 20 tickerów — czytelniej dla modelu niż jedna linia
+            chunk_size = 20
+            chunks = [
+                ", ".join(inject_list[i:i + chunk_size])
+                for i in range(0, len(inject_list), chunk_size)
+            ]
+            avoid_str = "\n".join(chunks)
+
+            total = len(self.avoid_tickers)
+            shown = len(inject_list)
+            omitted_note = (
+                f" ({total - shown} more omitted — oldest entries)"
+                if total > PROMPT_INJECT_LIMIT else ""
+            )
+
             system_prompt += (
                 f"\n\nCRITICAL — FEEDBACK FROM PREVIOUS RUNS:\n"
-                f"The following symbols were previously returned by you but are NOT available "
-                f"on Yahoo Finance (yf.Ticker returned no data). "
-                f"Do NOT include any of these in your response:\n{avoid_str}"
+                f"The following {shown} symbols were previously returned by you but are NOT "
+                f"available on Yahoo Finance (yf.Ticker returned no data).{omitted_note} "
+                f"Do NOT include ANY of these in your response:\n{avoid_str}"
             )
-            logger.info(f"Feedback loop: {len(self.avoid_tickers)} tickerów do unikania wstrzykniętych do promptu")
+            logger.info(
+                f"Feedback loop: {shown}/{total} tickerów wstrzykniętych do promptu"
+                + (f" ({total - shown} pominięto)" if total > PROMPT_INJECT_LIMIT else "")
+            )
 
         # Kontekst makroekonomiczny
         if macro_context:

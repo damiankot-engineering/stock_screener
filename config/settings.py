@@ -81,6 +81,7 @@ def _default_config() -> dict[str, Any]:
             "fetch_workers": 5, "api_delay_seconds": 0.3, "db_path": "screener_data.db",
             "reports_dir": "reports", "log_level": "INFO", "price_history_days": 400,
             "max_fetch_errors": 3,
+            "feedback_loop_limit": 500,
         },
     }
 

@@ -478,10 +478,15 @@ class ScreenerRepository:
             session.commit()
         logger.debug(f"Cache walidacji: zapisano {len(rows)} wpisów")
 
-    def get_invalid_tickers(self, limit: int = 50) -> list[str]:
+    def get_invalid_tickers(self, limit: int = 500) -> list[str]:
         """
-        Zwróć listę tickerów, które konsekwentnie nie przechodzą walidacji.
+        Zwróć listę tickerów, które nie przechodzą walidacji yfinance.
         Używane jako feedback loop dla AI (lista do unikania w promptach).
+
+        Domyślny limit zwiększony do 500 — baza rośnie z każdym runem i
+        50 tickerów szybko przestaje wystarczać. Prompt i tak dostaje tylko
+        tyle, ile AI sensownie przetworzy (patrz: ai_ticker_source.py).
+        Porządkowanie: najnowsze wpisy pierwsze (najświeższy sygnał ważniejszy).
         """
         with self._session_factory() as session:
             rows = (

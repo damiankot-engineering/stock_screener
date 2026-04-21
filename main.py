@@ -112,7 +112,8 @@ class ScreenerPipeline:
         logger.info("=" * 60)
         logger.info(f"KROK 1: AI Ticker Source [backend={backend}, strategia={strategy}, n={n_tickers}]")
         # Wstrzyknij do promptu tickery znane jako niedziałające w yfinance
-        invalid_known = self.repository.get_invalid_tickers(limit=50)
+        feedback_limit = self.config.get("settings", {}).get("feedback_loop_limit", 500)
+        invalid_known = self.repository.get_invalid_tickers(limit=feedback_limit)
         if invalid_known:
             source_config.setdefault("ai", {})["avoid_tickers"] = invalid_known
             logger.info(f"Feedback loop: {len(invalid_known)} znanych złych tickerów dodanych do promptu AI")
