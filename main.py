@@ -335,6 +335,106 @@ class ScreenerPipeline:
                 )
             c.print(t2)
 
+    def reset_all(self, keep_config: bool = False) -> None:
+        """
+        Całkowity reset — usuwa bazę danych, raporty CSV i cache walidacji.
+        Przywraca projekt do stanu jak po pierwszej instalacji.
+
+        Wymaga potwierdzenia w CLI (--yes) lub interaktywnego yes/no.
+        """
+        settings     = self.config.get("settings", {})
+        db_path      = settings.get("db_path",     "screener_data.db")
+        reports_dir  = settings.get("reports_dir", "reports")
+        scheduler_db = "screener_jobs.db"
+
+        import glob
+        from pathlib import Path
+
+        # Zbierz wszystko co zostanie usunięte
+        files_to_delete: list[Path] = []
+        dirs_to_clear:   list[Path] = []
+
+        # Pliki DB (SQLite + WAL + SHM)
+        for pattern in [db_path, f"{db_path}-wal", f"{db_path}-shm",
+                        scheduler_db, f"{scheduler_db}-wal", f"{scheduler_db}-shm"]:
+            p = Path(pattern)
+            if p.exists():
+                files_to_delete.append(p)
+
+        # Raporty CSV
+        reports_path = Path(reports_dir)
+        if reports_path.exists():
+            csv_files = list(reports_path.glob("*.csv"))
+            files_to_delete.extend(csv_files)
+            dirs_to_clear.append(reports_path)
+
+        if not files_to_delete:
+            print("\n  Nic do usunięcia — projekt jest już czysty.\n")
+            return
+
+        # Podsumowanie tego co zostanie usunięte
+        print()
+        print("=" * 60)
+        print("  ⚠️   RESET PROJEKTU — OPERACJA NIEODWRACALNA")
+        print("=" * 60)
+        print(f"\n  Zostanie usunięte ({len(files_to_delete)} plików):\n")
+        for f in sorted(files_to_delete):
+            size = f.stat().st_size
+            size_str = (f"{size/1024:.1f} KB" if size < 1_048_576
+                        else f"{size/1_048_576:.1f} MB")
+            print(f"    🗑  {f}  ({size_str})")
+        print()
+
+        total_bytes = sum(f.stat().st_size for f in files_to_delete)
+        total_str = (f"{total_bytes/1024:.1f} KB" if total_bytes < 1_048_576
+                     else f"{total_bytes/1_048_576:.1f} MB")
+        print(f"  Łączny rozmiar: {total_str}")
+        print()
+        print("  Zachowane: konfiguracja (user_config.yaml), kod źródłowy")
+        print()
+
+        # Potwierdzenie
+        try:
+            answer = input("  Wpisz 'RESET' aby potwierdzić lub cokolwiek innego aby anulować: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Anulowano.")
+            return
+
+        if answer != "RESET":
+            print("\n  Anulowano. Żadne dane nie zostały usunięte.\n")
+            return
+
+        # Usuń pliki
+        deleted     = 0
+        delete_errors = []
+        for f in files_to_delete:
+            try:
+                f.unlink()
+                deleted += 1
+            except Exception as exc:
+                delete_errors.append(f"  ! Nie można usunąć {f}: {exc}")
+
+        # Opcjonalnie: usuń pusty katalog reports
+        for d in dirs_to_clear:
+            try:
+                remaining = list(d.iterdir())
+                if not remaining:
+                    d.rmdir()
+            except Exception:
+                pass
+
+        print()
+        print("=" * 60)
+        print(f"  ✅  Reset zakończony: usunięto {deleted}/{len(files_to_delete)} plików")
+        if delete_errors:
+            for err in delete_errors:
+                print(err)
+        print()
+        print("  Projekt jest czysty. Następne uruchomienie zaczyna od zera:")
+        print("    python main.py")
+        print("=" * 60)
+        print()
+
     def schedule(self) -> None:
         from scheduler.runner import start_scheduler
         start_scheduler(self.run, self.config.get("scheduler", {}))
@@ -393,6 +493,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analyze", action="store_true")
     parser.add_argument("--schedule", action="store_true")
     parser.add_argument("--top", type=int, default=20)
+    parser.add_argument(
+        "--reset", action="store_true",
+        help="Usuń całą historię (DB, raporty CSV) i zacznij od zera. Wymaga potwierdzenia.",
+    )
     return parser.parse_args()
 
 
@@ -401,6 +505,22 @@ def main() -> None:
 
     args = parse_args()
     config = load_config(args.config)
+
+    # --reset nie wymaga inicjalizacji DB ani AI — obsłuż przed ScreenerPipeline
+    if args.reset:
+        # Minimal pipeline init (tylko config + settings, bez DB connections)
+        settings    = config.get("settings", {})
+        db_path     = settings.get("db_path",     "screener_data.db")
+        reports_dir = settings.get("reports_dir", "reports")
+        # Stwórz tymczasowy obiekt tylko po to by wywołać reset_all()
+        # Pipeline konstruktor nie łączy się z DB jeśli --reset przerwie wcześniej
+        from config.settings import setup_logging
+        setup_logging(settings.get("log_level", "INFO"))
+        _tmp = object.__new__(ScreenerPipeline)
+        _tmp.config   = config
+        _tmp.reporter = Reporter(reports_dir)
+        ScreenerPipeline.reset_all(_tmp)
+        return
 
     # Nadpisz parametry z CLI
     ai_cfg = config.setdefault("source", {}).setdefault("ai", {})
