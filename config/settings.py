@@ -77,6 +77,11 @@ def _default_config() -> dict[str, Any]:
             "min_history_runs": 3, "stability_bonus_weight": 0.5,
         },
         "scheduler": {"enabled": False, "frequency": "weekly", "run_at_hour": 7, "weekday": 0},
+        "backtesting": {
+            "benchmark_ticker": "SPY",
+            "initial_capital": 100_000.0,
+            "transaction_cost_bps": 10.0,
+        },
         "settings": {
             "fetch_workers": 5, "api_delay_seconds": 0.3, "db_path": "screener_data.db",
             "reports_dir": "reports", "log_level": "INFO", "price_history_days": 400,

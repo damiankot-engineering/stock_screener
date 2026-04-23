@@ -246,6 +246,57 @@ class InsiderSignalCache(Base):
                 f"buy_ratio={self.buy_ratio} buys={self.buys} sells={self.sells}>")
 
 
+
+# ─────────────────────────────────────────────────────────────
+# Tabela 8: Wyniki backtestingu
+# ─────────────────────────────────────────────────────────────
+
+class BacktestRun(Base):
+    """
+    Wyniki jednego uruchomienia backtestingu.
+    Przechowuje metryki zagregowane oraz ścieżki do plików CSV.
+    """
+    __tablename__ = "backtest_runs"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    run_timestamp       = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    n_builds_used       = Column(Integer, default=0)
+    initial_capital     = Column(Float, nullable=False, default=100_000.0)
+    benchmark_ticker    = Column(String(20), nullable=True)
+    transaction_cost_bps= Column(Float, default=10.0)
+
+    # Metryki portfela
+    total_return        = Column(Float, nullable=True)
+    cagr                = Column(Float, nullable=True)
+    volatility_ann      = Column(Float, nullable=True)
+    sharpe_ratio        = Column(Float, nullable=True)
+    sortino_ratio       = Column(Float, nullable=True)
+    max_drawdown        = Column(Float, nullable=True)
+    calmar_ratio        = Column(Float, nullable=True)
+    win_rate            = Column(Float, nullable=True)
+    alpha               = Column(Float, nullable=True)
+    beta                = Column(Float, nullable=True)
+
+    # Metryki benchmarku
+    benchmark_total_return = Column(Float, nullable=True)
+    benchmark_cagr         = Column(Float, nullable=True)
+    benchmark_sharpe       = Column(Float, nullable=True)
+    benchmark_max_drawdown = Column(Float, nullable=True)
+
+    # Ścieżki plików CSV
+    nav_csv_path        = Column(Text, nullable=True)
+    metrics_csv_path    = Column(Text, nullable=True)
+    monthly_csv_path    = Column(Text, nullable=True)
+    rebalance_csv_path  = Column(Text, nullable=True)
+
+    notes               = Column(Text, nullable=True)
+
+    def __repr__(self):
+        return (f"<BacktestRun id={self.id} "
+                f"cagr={self.cagr:.2%} sharpe={self.sharpe_ratio:.2f} "
+                f"@ {self.run_timestamp:%Y-%m-%d}>")
+
+
 def create_db_engine(db_path: str):
     """
     Utwórz silnik SQLAlchemy dla bazy SQLite.

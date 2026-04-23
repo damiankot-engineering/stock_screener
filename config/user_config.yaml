@@ -136,6 +136,20 @@ settings:
   # jest w bazie jako rezerwa na wypadek dalszego rozszerzenia limitu)
   feedback_loop_limit: 500
 
+
+# ── BACKTESTING ──────────────────────────────────────────────
+backtesting:
+  # Ticker benchmarku (np. SPY, QQQ, ^GSPC, ^STOXX50E)
+  benchmark_ticker: "SPY"
+
+  # Kapitał startowy symulacji (w USD)
+  initial_capital: 100000.0
+
+  # Koszt transakcji w bps (basis points) per strona
+  # 10 bps = 0.1% — realistyczny dla ETF/akcji US
+  # 0 = brak kosztów (idealna symulacja)
+  transaction_cost_bps: 10.0
+
 # ── ZEWNĘTRZNE ŹRÓDŁA DANYCH ─────────────────────────────────
 external_data:
 

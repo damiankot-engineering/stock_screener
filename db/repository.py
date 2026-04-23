@@ -15,7 +15,7 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from .models import (
-    MetricSnapshot, PortfolioSnapshot,
+    BacktestRun, MetricSnapshot, PortfolioSnapshot,
     ScreeningResult, ScreeningRun,
     TickerValidationCache,
 )
@@ -402,6 +402,104 @@ class ScreenerRepository:
             )
         return pd.DataFrame(data, columns=["ticker", "weight", "score",
                                             "stability_score", "timestamp"])
+
+
+    def get_portfolio_builds_history(self) -> pd.DataFrame:
+        """
+        Pobierz pełną historię buildów portfela dla backtestingu.
+        Zwraca DataFrame z kolumnami: run_id, timestamp, ticker, weight, score, stability_score.
+        Zawiera TYLKO rekordy portfolio_build (nie screening runs).
+        """
+        with self._session_factory() as session:
+            data = (
+                session.query(
+                    PortfolioSnapshot.run_id,
+                    PortfolioSnapshot.ticker,
+                    PortfolioSnapshot.weight,
+                    PortfolioSnapshot.score,
+                    PortfolioSnapshot.stability_score,
+                    ScreeningRun.run_timestamp,
+                )
+                .join(ScreeningRun, PortfolioSnapshot.run_id == ScreeningRun.id)
+                .filter(ScreeningRun.source_index == "portfolio_build")
+                .order_by(ScreeningRun.run_timestamp.asc())
+                .all()
+            )
+        if not data:
+            return pd.DataFrame(
+                columns=["run_id", "ticker", "weight", "score", "stability_score", "timestamp"]
+            )
+        return pd.DataFrame(data, columns=[
+            "run_id", "ticker", "weight", "score", "stability_score", "timestamp"
+        ])
+
+    def save_backtest_run(
+        self,
+        result,   # BacktestResult
+        csv_paths: dict[str, str] | None = None,
+    ) -> int:
+        """
+        Zapisz wyniki backtestingu do tabeli backtest_runs.
+        Zwraca ID nowego rekordu.
+        """
+        m  = result.metrics or {}
+        bm = result.benchmark_metrics or {}
+        csv_paths = csv_paths or {}
+
+        with self._session_factory() as session:
+            rec = BacktestRun(
+                run_timestamp        = datetime.utcnow(),
+                n_builds_used        = result.n_builds_used,
+                initial_capital      = result.config.initial_capital,
+                benchmark_ticker     = result.config.benchmark_ticker,
+                transaction_cost_bps = result.config.transaction_cost_bps,
+                total_return         = m.get("total_return"),
+                cagr                 = m.get("cagr"),
+                volatility_ann       = m.get("volatility_ann"),
+                sharpe_ratio         = m.get("sharpe_ratio"),
+                sortino_ratio        = m.get("sortino_ratio"),
+                max_drawdown         = m.get("max_drawdown"),
+                calmar_ratio         = m.get("calmar_ratio"),
+                win_rate             = m.get("win_rate"),
+                alpha                = m.get("alpha"),
+                beta                 = m.get("beta"),
+                benchmark_total_return = bm.get("total_return"),
+                benchmark_cagr         = bm.get("cagr"),
+                benchmark_sharpe       = bm.get("sharpe_ratio"),
+                benchmark_max_drawdown = bm.get("max_drawdown"),
+                nav_csv_path         = csv_paths.get("nav"),
+                metrics_csv_path     = csv_paths.get("metrics"),
+                monthly_csv_path     = csv_paths.get("monthly"),
+                rebalance_csv_path   = csv_paths.get("rebalance"),
+                notes                = "; ".join(result.warnings) if result.warnings else None,
+            )
+            session.add(rec)
+            session.commit()
+            session.refresh(rec)
+            bt_id = rec.id
+        logger.info(f"Zapisano wyniki backtestingu ID={bt_id}")
+        return bt_id
+
+    def get_backtest_history(self) -> pd.DataFrame:
+        """Pobierz historię wszystkich uruchomień backtestingu."""
+        with self._session_factory() as session:
+            rows = (
+                session.query(BacktestRun)
+                .order_by(BacktestRun.run_timestamp.desc())
+                .all()
+            )
+            return pd.DataFrame([{
+                "id":           r.id,
+                "timestamp":    r.run_timestamp,
+                "n_builds":     r.n_builds_used,
+                "total_return": r.total_return,
+                "cagr":         r.cagr,
+                "sharpe":       r.sharpe_ratio,
+                "max_drawdown": r.max_drawdown,
+                "alpha":        r.alpha,
+                "beta":         r.beta,
+                "benchmark":    r.benchmark_ticker,
+            } for r in rows])
 
     def get_run_count(self) -> int:
         """

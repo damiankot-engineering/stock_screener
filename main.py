@@ -61,6 +61,8 @@ from screening.filter_engine import FilterEngine
 from screening.scorer import Scorer
 from portfolio.builder import PortfolioBuilder
 from reports.reporter import Reporter
+from backtesting.engine import BacktestEngine, BacktestConfig
+from backtesting.report import BacktestReporter
 
 logger = logging.getLogger(__name__)
 
@@ -364,8 +366,16 @@ class ScreenerPipeline:
         # Raporty CSV
         reports_path = Path(reports_dir)
         if reports_path.exists():
-            csv_files = list(reports_path.glob("*.csv"))
-            files_to_delete.extend(csv_files)
+            # Pliki backtestingu: backtest_metrics_*.csv, backtest_nav_*.csv, itd.
+            backtest_files = list(reports_path.glob("backtest_*.csv"))
+            files_to_delete.extend(backtest_files)
+            
+            # Pozostałe raporty CSV (screening, portfolio)
+            other_csv_files = list(reports_path.glob("*.csv"))
+            for f in other_csv_files:
+                if f not in backtest_files:
+                    files_to_delete.append(f)
+            
             dirs_to_clear.append(reports_path)
 
         if not files_to_delete:
@@ -435,6 +445,72 @@ class ScreenerPipeline:
         print("=" * 60)
         print()
 
+    # ══════════════════════════════════════════════════════════
+    # TRYB 4: BACKTEST — symulacja historyczna
+    # ══════════════════════════════════════════════════════════
+
+    def run_backtest(
+        self,
+        benchmark: str = "SPY",
+        initial_capital: float = 100_000.0,
+        transaction_cost_bps: float = 10.0,
+        lookback_days: int = 730,
+    ) -> dict:
+        """
+        Uruchom backtest portfela historycznego.
+        Wymaga co najmniej jednego buildu portfela w DB (--build-portfolio).
+        lookback_days — okno śledzenia wstecz w dniach kalendarzowych (domyślnie: 730).
+        """
+        from rich.console import Console
+        from rich.panel import Panel
+        c = Console()
+
+        bt_cfg = self.config.get("backtesting", {})
+        benchmark            = bt_cfg.get("benchmark_ticker", benchmark)
+        initial_capital      = bt_cfg.get("initial_capital", initial_capital)
+        transaction_cost_bps = bt_cfg.get("transaction_cost_bps", transaction_cost_bps)
+        lookback_days        = bt_cfg.get("lookback_days", lookback_days)
+
+        c.print()
+        c.print(Panel.fit(
+            f"[bold magenta]🔬 BACKTEST PORTFELA HISTORYCZNEGO[/bold magenta]\n"
+            f"[dim]Benchmark:[/dim] [white]{benchmark}[/white]   "
+            f"[dim]Kapitał startowy:[/dim] [white]{initial_capital:,.0f}[/white]   "
+            f"[dim]Koszt transakcji:[/dim] [white]{transaction_cost_bps} bps[/white]   "
+            f"[dim]Okno śledzenia:[/dim] [white]{lookback_days} dni[/white]",
+            border_style="magenta",
+        ))
+
+        config = BacktestConfig(
+            initial_capital=initial_capital,
+            benchmark_ticker=benchmark,
+            transaction_cost_bps=transaction_cost_bps,
+            lookback_days=lookback_days,
+        )
+        engine   = BacktestEngine(repository=self.repository, config=config)
+        result   = engine.run()
+
+        reporter = BacktestReporter(
+            reports_dir=self.config.get("settings", {}).get("reports_dir", "reports")
+        )
+        reporter.print_results(result, benchmark_ticker=benchmark)
+
+        if result.is_valid:
+            csv_paths = reporter.save_csv(result)
+            bt_id = self.repository.save_backtest_run(result, csv_paths=csv_paths)
+            c.print(f"[dim]Wyniki backtestingu zapisane (ID={bt_id}). Pliki CSV: {list(csv_paths.values())}[/dim]")
+            return {
+                "status":       "ok",
+                "backtest_id":  bt_id,
+                "total_return": result.metrics.get("total_return"),
+                "cagr":         result.metrics.get("cagr"),
+                "sharpe":       result.metrics.get("sharpe_ratio"),
+                "max_drawdown": result.metrics.get("max_drawdown"),
+            }
+        else:
+            c.print(f"[yellow]⚠ Backtest nie zwrócił wyników: {result.warnings}[/yellow]")
+            return {"status": "failed", "warnings": result.warnings}
+
     def schedule(self) -> None:
         from scheduler.runner import start_scheduler
         start_scheduler(self.run, self.config.get("scheduler", {}))
@@ -491,6 +567,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runs", type=int, default=None,
         help="Liczba ostatnich runów do analizy przy --build-portfolio")
     parser.add_argument("--analyze", action="store_true")
+    parser.add_argument("--backtest", action="store_true",
+        help="Uruchom backtest portfela historycznego (wymaga wcześniejszego --build-portfolio)")
+    parser.add_argument("--benchmark", default=None,
+        help="Ticker benchmarku dla backtestingu (domyślnie: SPY)")
+    parser.add_argument("--capital", type=float, default=None,
+        help="Kapitał startowy backtestingu (domyślnie: 100000)")
+    parser.add_argument("--tx-cost", type=float, default=None, dest="tx_cost",
+        help="Koszt transakcji w bps (domyślnie: 10)")
+    parser.add_argument("--lookback", type=int, default=None, dest="lookback",
+        help="Okno śledzenia backtestingu w dniach kalendarzowych (domyślnie: 730)")
     parser.add_argument("--schedule", action="store_true")
     parser.add_argument("--top", type=int, default=20)
     parser.add_argument(
@@ -544,6 +630,13 @@ def main() -> None:
         pipeline.build_portfolio(n_last_runs=args.runs)
     elif args.analyze:
         pipeline.analyze_history()
+    elif args.backtest:
+        kwargs = {}
+        if args.benchmark:  kwargs["benchmark"]            = args.benchmark
+        if args.capital:    kwargs["initial_capital"]      = args.capital
+        if args.tx_cost:    kwargs["transaction_cost_bps"] = args.tx_cost
+        if args.lookback:   kwargs["lookback_days"]        = args.lookback
+        pipeline.run_backtest(**kwargs)
     elif args.schedule:
         pipeline.schedule()
     else:
